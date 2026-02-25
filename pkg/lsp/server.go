@@ -67,7 +67,7 @@ func (s *Server) initialize(context *glsp.Context, params *protocol.InitializePa
 
 	// Custom commands
 	capabilities.ExecuteCommandProvider = &protocol.ExecuteCommandOptions{
-		Commands: []string{"helm.renderPreview"},
+		Commands: []string{"helm.renderPreview", "helm.renderFullPreview"},
 	}
 
 	version := "0.1.0"

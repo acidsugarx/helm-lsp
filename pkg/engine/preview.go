@@ -85,3 +85,37 @@ func RenderPreview(chartRoot string, uri string, content string) (string, error)
 
 	return result.String(), nil
 }
+
+// RenderFullChart renders the entire Helm chart and returns all manifests.
+func RenderFullChart(chartRoot string) (string, error) {
+	ch, err := ParseChart(chartRoot)
+	if err != nil {
+		return "", fmt.Errorf("failed to parse chart: %w", err)
+	}
+
+	additionalVals, err := LoadAdditionalValues(chartRoot)
+	if err != nil {
+		additionalVals = map[string]interface{}{}
+	}
+	mergedVals, err := MergeValues(ch, additionalVals)
+	if err != nil {
+		return "", fmt.Errorf("failed to merge values: %w", err)
+	}
+
+	renderEngine := action.NewInstall(&action.Configuration{})
+	renderEngine.ClientOnly = true
+	renderEngine.DryRun = true
+	renderEngine.ReleaseName = "lsp-preview"
+	renderEngine.Namespace = "default"
+
+	rel, err := renderEngine.Run(ch, mergedVals)
+	if err != nil {
+		return "", fmt.Errorf("render error: %w", err)
+	}
+
+	if rel == nil || rel.Manifest == "" {
+		return "# No output rendered\n", nil
+	}
+
+	return rel.Manifest, nil
+}

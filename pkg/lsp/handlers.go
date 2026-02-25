@@ -405,6 +405,36 @@ func (s *Server) executeCommand(context *glsp.Context, params *protocol.ExecuteC
 			"error":   "",
 		}, nil
 
+	case "helm.renderFullPreview":
+		// Expect args[0] to be the document URI (to find the chart root)
+		if len(params.Arguments) == 0 {
+			return nil, fmt.Errorf("helm.renderFullPreview requires a document URI argument")
+		}
+
+		uri, ok := params.Arguments[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("helm.renderFullPreview: argument must be a string URI")
+		}
+
+		filePath := uriToPath(uri)
+		chartRoot := findChartRoot(filepath.Dir(filePath))
+		if chartRoot == "" {
+			return nil, fmt.Errorf("no Chart.yaml found for %s", uri)
+		}
+
+		rendered, err := engine.RenderFullChart(chartRoot)
+		if err != nil {
+			return map[string]interface{}{
+				"error":   err.Error(),
+				"content": "",
+			}, nil
+		}
+
+		return map[string]interface{}{
+			"content": rendered,
+			"error":   "",
+		}, nil
+
 	default:
 		return nil, fmt.Errorf("unknown command: %s", params.Command)
 	}
