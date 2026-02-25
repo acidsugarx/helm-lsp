@@ -340,6 +340,56 @@ func envNameToValuesKey(name string) string {
 	return result
 }
 
+// containsPath checks if a path slice contains a specific segment.
+func containsPath(path []string, target string) bool {
+	for _, p := range path {
+		if p == target {
+			return true
+		}
+	}
+	return false
+}
+
+// findContainerName scans upward from lineIdx to find the container's `- name:` field.
+// It looks for the nearest `- name:` at or above the `containers:` level.
+func findContainerName(lines []string, lineIdx int) string {
+	if lineIdx >= len(lines) {
+		return ""
+	}
+
+	currentIndent := countIndent(lines[lineIdx])
+	nameWithDashRegex := regexp.MustCompile(`^\s*-\s+name:\s+(.+)$`)
+
+	// Scan upward looking for `- name:` that starts a container list item
+	for i := lineIdx - 1; i >= 0 && i >= lineIdx-30; i-- {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+
+		lineIndent := countIndent(line)
+
+		// If we hit `containers:` itself, stop
+		if strings.TrimSpace(line) == "containers:" {
+			break
+		}
+
+		// Look for `- name:` at a lower indent (the start of the container item)
+		if lineIndent < currentIndent {
+			if m := nameWithDashRegex.FindStringSubmatch(line); m != nil {
+				name := strings.TrimSpace(m[1])
+				// Make sure it's not an env name (env names are deeper indented)
+				// Container names are at the containers list level
+				return name
+			}
+		}
+	}
+
+	return ""
+}
+
 // extractToValuesActions suggests extracting a hardcoded value to values.yaml.
 // Scope-aware (uses $.Values inside range/with) and YAML-path-aware.
 func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, uri string, scope TemplateScope) []protocol.CodeAction {
@@ -386,13 +436,26 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 		}
 	}
 
+	// Container name prefix: if inside a containers list, find the container name
+	// and use it as a prefix. e.g. under `- name: web-server` → .Values.webServer.image
+	containerPrefix := ""
+	if containsPath(parentPath, "containers") {
+		if cName := findContainerName(lines, lineIdx); cName != "" {
+			containerPrefix = envNameToValuesKey(cName) // reuse camelCase converter
+		}
+	}
+
 	// Build the full values path: parentPath + sanitized key
 	// Keep meaningful parents (like "annotations"), filter only K8s structural ones
 	structuralParents := map[string]bool{
 		"metadata": true, "spec": true, "template": true, "containers": true,
 		"selector": true, "matchLabels": true, "data": true, "env": true,
+		"ports": true,
 	}
 	var cleanPath []string
+	if containerPrefix != "" {
+		cleanPath = append(cleanPath, containerPrefix)
+	}
 	for _, p := range parentPath {
 		if !structuralParents[p] {
 			cleanPath = append(cleanPath, p)
