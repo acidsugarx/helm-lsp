@@ -181,6 +181,27 @@ func (s *Server) textDocumentHover(context *glsp.Context, params *protocol.Hover
 
 	path, isValues, isMapKey := engine.ResolveValuesPath(lines, int(lineIdx), word)
 	if !isValues || len(path) == 0 {
+		// 4. Fallback to K8s Schema Field Hover
+		apiVersion, kind := extractManifestType(lines)
+		if apiVersion != "" && kind != "" {
+			parentPath := engine.DetectYAMLPath(lines, int(lineIdx))
+			// Only append word if it's likely a YAML key (e.g. before colon)
+			fullPath := parentPath
+			if strings.Contains(lineText, word+":") {
+				fullPath = append(fullPath, word)
+			}
+			desc, err := engine.GlobalSchemaManager.GetFieldDescription(apiVersion, kind, fullPath)
+			if err == nil && desc != "" {
+				markdown := fmt.Sprintf("**Kubernetes Schema: %s**\n\n```text\nPath: %s\n```\n\n%s", kind, strings.Join(fullPath, "."), desc)
+				return &protocol.Hover{
+					Contents: protocol.MarkupContent{
+						Kind:  protocol.MarkupKindMarkdown,
+						Value: markdown,
+					},
+				}, nil
+			}
+		}
+
 		return nil, nil
 	}
 
@@ -483,4 +504,19 @@ func (s *Server) executeCommand(context *glsp.Context, params *protocol.ExecuteC
 	default:
 		return nil, fmt.Errorf("unknown command: %s", params.Command)
 	}
+}
+
+// extractManifestType scans the lines of a YAML file to find apiVersion and kind.
+func extractManifestType(lines []string) (apiVersion, kind string) {
+	for _, l := range lines {
+		trim := strings.TrimSpace(l)
+		if strings.HasPrefix(trim, "apiVersion:") {
+			apiVersion = strings.TrimSpace(strings.TrimPrefix(trim, "apiVersion:"))
+			apiVersion = strings.Trim(apiVersion, `"'`)
+		} else if strings.HasPrefix(trim, "kind:") {
+			kind = strings.TrimSpace(strings.TrimPrefix(trim, "kind:"))
+			kind = strings.Trim(kind, `"'`)
+		}
+	}
+	return
 }

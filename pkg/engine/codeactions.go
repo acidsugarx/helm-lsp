@@ -146,10 +146,10 @@ func detectScope(lines []string, lineIdx int) TemplateScope {
 	return scope
 }
 
-// detectYAMLPath scans upward from lineIdx to build the YAML key path.
+// DetectYAMLPath scans upward from lineIdx to build the YAML key path.
 // For example, if the cursor is on `replicas: 3` under `spec:`, returns ["spec"].
 // Handles nested indentation and skips list items, template lines, and comments.
-func detectYAMLPath(lines []string, lineIdx int) []string {
+func DetectYAMLPath(lines []string, lineIdx int) []string {
 	if lineIdx >= len(lines) {
 		return nil
 	}
@@ -477,7 +477,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	}
 
 	// Build YAML path: detect parent keys from indentation
-	parentPath := detectYAMLPath(lines, lineIdx)
+	parentPath := DetectYAMLPath(lines, lineIdx)
 
 	// Smart env var detection: when extracting 'value:' inside an env list item,
 	// look for a sibling 'name:' field and use it as the values key.
