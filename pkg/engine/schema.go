@@ -39,12 +39,8 @@ func ValidateSchematic(manifests string, templateContent string, templateName st
 			if len(lines) > 0 && strings.HasPrefix(lines[0], "# Source:") {
 				sourceLine := strings.TrimSpace(lines[0])
 				if !strings.HasSuffix(sourceLine, templateName) {
-					log.Printf("Schema validator: skipping doc (source=%q, want suffix=%q)", sourceLine, templateName)
 					continue
 				}
-				log.Printf("Schema validator: matched doc (source=%q)", sourceLine)
-			} else {
-				log.Printf("Schema validator: doc has no # Source header, including it")
 			}
 		}
 
@@ -72,7 +68,6 @@ func ValidateSchematic(manifests string, templateContent string, templateName st
 		apiVal, okApi := obj["apiVersion"].(string)
 
 		if !okKind || !okApi {
-			log.Printf("Schema validator: doc missing kind=%v or apiVersion=%v, skipping", okKind, okApi)
 			continue // Not a valid K8s resource
 		}
 
@@ -96,7 +91,7 @@ func ValidateSchematic(manifests string, templateContent string, templateName st
 				}
 			}
 		} else {
-			log.Printf("Schema validator: %s/%s passed validation ✓", kindVal, getMetadataName(obj))
+			log.Printf("Schema validator: %s/%s ✓", kindVal, getMetadataName(obj))
 		}
 	}
 

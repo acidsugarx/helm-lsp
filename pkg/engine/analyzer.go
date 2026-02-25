@@ -14,7 +14,6 @@ func WordAtPosition(line string, charIndex int) (string, error) {
 	}
 
 	// For Helm templates, a "word" is usually a dot-separated path, alphanumeric chars, underscores, dashes, and $ for variables.
-	// For Helm templates, a "word" is usually a dot-separated path, alphanumeric chars, underscores, dashes, and $ for variables.
 	// E.g., .Values.my-db.user_name or $ing.annotations
 	// It could also just be a plain function name like `include`, `dict`, `default`
 	wordRegex := regexp.MustCompile(`[\$a-zA-Z0-9_\-\.]+`)

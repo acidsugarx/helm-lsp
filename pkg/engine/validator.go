@@ -11,6 +11,13 @@ import (
 	"helm.sh/helm/v3/pkg/action"
 )
 
+// Pre-compiled regexes for hot-loop checkers (avoid recompiling per line)
+var (
+	singleBraceVarRegex = regexp.MustCompile(`(?:^|[^{])\{-?\s+\$`)
+	singleBraceDotRegex = regexp.MustCompile(`(?:^|[^{])\{-?\s+\.`)
+	undefVarRegex       = regexp.MustCompile(`undefined variable "(\$.*?)"`)
+)
+
 // ValidateChart performs a virtual `helm template` render in memory.
 // It parses the Helm errors (if any) and converts them to LSP Diagnostics.
 func ValidateChart(chartRoot string, uri string, content string) ([]protocol.Diagnostic, error) {
@@ -23,7 +30,7 @@ func ValidateChart(chartRoot string, uri string, content string) ([]protocol.Dia
 
 	// Find the matching template in the loaded chart and overwrite it with active Editor content.
 	// This makes validation "live" as you type, without needing to save the file.
-	targetPath := uriToPath(uri)
+	targetPath := UriToPath(uri)
 	matchedTemplateName := ""
 	for _, t := range ch.Templates {
 		// Helm template names are usually "templates/file.yaml"
@@ -84,9 +91,8 @@ func ValidateChart(chartRoot string, uri string, content string) ([]protocol.Dia
 	return diagnostics, nil
 }
 
-// uriToPath converts a file:// URI back to an absolute local path.
-// Doing it here too since we need it for string matching.
-func uriToPath(uri string) string {
+// UriToPath converts a file:// URI back to an absolute local path.
+func UriToPath(uri string) string {
 	return strings.TrimPrefix(uri, "file://")
 }
 
@@ -95,7 +101,7 @@ func uriToPath(uri string) string {
 // Example: "execution error at (test-chart/templates/deployment.yaml:14:18): function "foobar" not defined"
 func parseHelmError(errMsg string, uri string, content string) []protocol.Diagnostic {
 	// We only care about errors for the current active file
-	targetPath := uriToPath(uri)
+	targetPath := UriToPath(uri)
 	fileName := ""
 	parts := strings.Split(targetPath, "/")
 	if len(parts) > 0 {
@@ -172,8 +178,7 @@ func parseHelmError(errMsg string, uri string, content string) []protocol.Diagno
 		// If it's an "undefined variable" error, the user might have made a typo during assignment (-{ instead of {{-).
 		// We can scan the document for the variable assignment and throw a hint.
 		if strings.Contains(msg, "undefined variable") {
-			varRegex := regexp.MustCompile(`undefined variable "(\$.*?)"`)
-			if m := varRegex.FindStringSubmatch(msg); len(m) > 1 {
+			if m := undefVarRegex.FindStringSubmatch(msg); len(m) > 1 {
 				varName := m[1]
 				for i, line := range lines {
 					if strings.Contains(line, varName) && strings.Contains(line, ":=") && !strings.Contains(line, "{{") {
@@ -270,7 +275,7 @@ func checkBrokenBrackets(content string) []protocol.Diagnostic {
 		}
 
 		// Check for single-brace variable assignment: `{- $var :=`
-		if regexp.MustCompile(`(?:^|[^{])\{-?\s+\$`).MatchString(trimmed) {
+		if singleBraceVarRegex.MatchString(trimmed) {
 			if !strings.Contains(trimmed, "{{") {
 				severity := protocol.DiagnosticSeverityWarning
 				source := "helm-syntax"
@@ -289,7 +294,7 @@ func checkBrokenBrackets(content string) []protocol.Diagnostic {
 
 		// Check for single-brace dot-expression: `{ .field` or `{- .field`
 		// This catches `replicas: { .replicas | default 1 }}`
-		if regexp.MustCompile(`(?:^|[^{])\{-?\s+\.`).MatchString(trimmed) {
+		if singleBraceDotRegex.MatchString(trimmed) {
 			if !strings.Contains(trimmed, "{{") || strings.Count(trimmed, "{")-strings.Count(trimmed, "{{") > 0 {
 				// There's a single { followed by a dot — likely a broken template expression
 				severity := protocol.DiagnosticSeverityWarning

@@ -3,12 +3,13 @@ package lsp
 import (
 	"os"
 	"path/filepath"
-	"strings"
+
+	"github.com/acidsugarx/helm-lsp/pkg/engine"
 )
 
-// uriToPath converts an LSP file:// URI to a local filesystem path.
+// uriToPath delegates to the shared engine.UriToPath.
 func uriToPath(uri string) string {
-	return strings.TrimPrefix(uri, "file://")
+	return engine.UriToPath(uri)
 }
 
 // pathToURI converts a local filesystem path to an LSP file:// URI.

@@ -1,20 +1,26 @@
 package lsp
 
 import (
+	"sync"
+	"time"
+
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 	"github.com/tliron/glsp/server"
 )
 
 type Server struct {
-	Handler *protocol.Handler
-	Server  *server.Server
-	Store   *DocumentStore
+	Handler        *protocol.Handler
+	Server         *server.Server
+	Store          *DocumentStore
+	debounceMu     sync.Mutex
+	debounceTimers map[string]*time.Timer
 }
 
 func NewServer() *Server {
 	s := &Server{
-		Store: NewDocumentStore(),
+		Store:          NewDocumentStore(),
+		debounceTimers: make(map[string]*time.Timer),
 	}
 
 	handler := &protocol.Handler{
@@ -84,7 +90,7 @@ func (s *Server) setTrace(context *glsp.Context, params *protocol.SetTraceParams
 
 func (s *Server) textDocumentDidOpen(context *glsp.Context, params *protocol.DidOpenTextDocumentParams) error {
 	s.Store.Set(params.TextDocument.URI, params.TextDocument.Text)
-	go s.validateDocument(context, params.TextDocument.URI, params.TextDocument.Text)
+	s.scheduleValidation(context, params.TextDocument.URI, params.TextDocument.Text)
 	return nil
 }
 
@@ -102,9 +108,24 @@ func (s *Server) textDocumentDidChange(context *glsp.Context, params *protocol.D
 	}
 
 	if latestContent != "" {
-		go s.validateDocument(context, params.TextDocument.URI, latestContent)
+		s.scheduleValidation(context, params.TextDocument.URI, latestContent)
 	}
 	return nil
+}
+
+// scheduleValidation debounces validation calls. Resets the timer on every keystroke.
+// Validation only fires 400ms after the user stops typing.
+func (s *Server) scheduleValidation(context *glsp.Context, uri string, content string) {
+	s.debounceMu.Lock()
+	defer s.debounceMu.Unlock()
+
+	if timer, exists := s.debounceTimers[uri]; exists {
+		timer.Stop()
+	}
+
+	s.debounceTimers[uri] = time.AfterFunc(400*time.Millisecond, func() {
+		s.validateDocument(context, uri, content)
+	})
 }
 
 func (s *Server) textDocumentDidClose(context *glsp.Context, params *protocol.DidCloseTextDocumentParams) error {
