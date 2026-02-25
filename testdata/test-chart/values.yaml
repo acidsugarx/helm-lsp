@@ -1,0 +1,28 @@
+replicaCount: 2
+image:
+  repository: nginx
+  tag: "1.25"
+  pullPolicy: IfNotPresent
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingresses:
+  main:
+    host: app.example.com
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector:
+  disktype: ssd
+
+tolerations: []

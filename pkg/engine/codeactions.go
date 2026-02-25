@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 
@@ -77,35 +78,43 @@ func detectScope(lines []string, lineIdx int) TemplateScope {
 
 	for i := lineIdx - 1; i >= 0; i-- {
 		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+
+		// Skip empty/comment lines
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
 
 		// Count end blocks (they close a scope above us)
-		if endBlockRegex.MatchString(line) {
+		if endBlockRegex.MatchString(trimmed) {
 			depth++
 			continue
 		}
 
 		// Range/with/define open a scope
-		if rangeBlockRegex.MatchString(line) {
+		if rangeBlockRegex.MatchString(trimmed) {
 			if depth > 0 {
 				depth--
 			} else {
 				scope.InRange = true
 				scope.Depth++
 				scope.RootRef = "$"
+				log.Printf("CodeAction: detected range scope at line %d", i)
 			}
 			continue
 		}
-		if withBlockRegex.MatchString(line) {
+		if withBlockRegex.MatchString(trimmed) {
 			if depth > 0 {
 				depth--
 			} else {
 				scope.InWith = true
 				scope.Depth++
 				scope.RootRef = "$"
+				log.Printf("CodeAction: detected with scope at line %d", i)
 			}
 			continue
 		}
-		if defineBlockRegex.MatchString(line) {
+		if defineBlockRegex.MatchString(trimmed) {
 			if depth > 0 {
 				depth--
 			} else {
@@ -116,6 +125,8 @@ func detectScope(lines []string, lineIdx int) TemplateScope {
 		}
 	}
 
+	log.Printf("CodeAction: scope for line %d: InRange=%v InWith=%v RootRef=%s Depth=%d",
+		lineIdx, scope.InRange, scope.InWith, scope.RootRef, scope.Depth)
 	return scope
 }
 
@@ -150,8 +161,13 @@ func extractToValuesActions(line, trimmed string, lineIdx int, uri string, scope
 		return nil
 	}
 
-	// Use $ prefix when inside range/with/define blocks
-	valuesRef := fmt.Sprintf("%s.Values.%s", scope.RootRef, key)
+	// Build the Values reference
+	var valuesRef string
+	if scope.RootRef == "$" {
+		valuesRef = fmt.Sprintf("$.Values.%s", key)
+	} else {
+		valuesRef = fmt.Sprintf(".Values.%s", key)
+	}
 
 	newLine := fmt.Sprintf("%s%s: {{ %s | default %s }}", indent, key, valuesRef, value)
 

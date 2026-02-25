@@ -1,0 +1,50 @@
+---
+# =============================================
+# TEST CHART — Code Actions Playground
+# =============================================
+# Каждая секция помечена, какой Code Action должен сработать.
+# Поставь курсор на помеченную строку → <leader>la
+# =============================================
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  # ✅ CODE ACTION: "Add | quote" — нет | quote
+  name: {{ .Values.service.type }}
+  labels:
+    # ✅ CODE ACTION: "indent → nindent"
+    {{- include "test-chart.labels" . | indent 4 }}
+spec:
+  replicas: {{ ..Values.replicas | default 3 }}
+  # ✅ CODE ACTION: ещё один Extract
+  minReadySeconds: {{ ..Values.minReadySeconds | default 10 }}
+  selector:
+    matchLabels:
+      app: {{ ..Values.app | default my-app }}
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      # ✅ CODE ACTION: Extract — простой хардкод
+      terminationGracePeriodSeconds: 30
+      containers:
+        - # ✅ CODE ACTION: Extract
+          name: web-server
+          # ✅ CODE ACTION: Extract
+          image: nginx:1.25
+          # ✅ CODE ACTION: Extract
+          imagePullPolicy: Always
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          resources:
+            # ✅ CODE ACTION: "toYaml без nindent"
+            {{- toYaml .Values.resources }}
+          env:
+            - name: APP_ENV
+              # ✅ CODE ACTION: Extract
+              value: production
+            - name: LOG_LEVEL
+              # ✅ CODE ACTION: Extract
+              value: info
