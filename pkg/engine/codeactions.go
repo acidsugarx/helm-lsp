@@ -32,7 +32,6 @@ var (
 	rangeBlockRegex  = regexp.MustCompile(`\{\{-?\s*range\b`)
 	rangeVarsRegex   = regexp.MustCompile(`range\s+(\$\w+)\s*,\s*(\$\w+)\s*:=`)
 	rangeSimpleRegex = regexp.MustCompile(`range\s+(\$\w+)\s*:=`)
-	withVarRegex     = regexp.MustCompile(`with\s+(\$\w+)\s*:=`)
 	withBlockRegex   = regexp.MustCompile(`\{\{-?\s*with\b`)
 	endBlockRegex    = regexp.MustCompile(`\{\{-?\s*end\s*-?\}\}`)
 	defineBlockRegex = regexp.MustCompile(`\{\{-?\s*define\b`)
@@ -61,13 +60,13 @@ func GetCodeActions(content string, rng protocol.Range, uri string) []protocol.C
 	actions = append(actions, extractToValuesActions(lines, line, trimmed, lineIdx, uri, scope)...)
 
 	// 2. Quote/toYaml helpers
-	actions = append(actions, quoteWrapActions(line, trimmed, lineIdx, uri)...)
+	actions = append(actions, quoteWrapActions(line, lineIdx, uri)...)
 
 	// 3. indent → nindent conversion
-	actions = append(actions, nindentActions(line, trimmed, lineIdx, uri)...)
+	actions = append(actions, nindentActions(line, lineIdx, uri)...)
 
 	// 4. Add nindent to toYaml without it
-	actions = append(actions, toYamlNindentActions(line, trimmed, lineIdx, uri)...)
+	actions = append(actions, toYamlNindentActions(line, lineIdx, uri)...)
 
 	return actions
 }
@@ -399,7 +398,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 }
 
 // quoteWrapActions suggests adding | quote to template expressions.
-func quoteWrapActions(line, trimmed string, lineIdx int, uri string) []protocol.CodeAction {
+func quoteWrapActions(line string, lineIdx int, uri string) []protocol.CodeAction {
 	var actions []protocol.CodeAction
 
 	matches := quoteRegex.FindStringSubmatchIndex(line)
@@ -443,7 +442,7 @@ func quoteWrapActions(line, trimmed string, lineIdx int, uri string) []protocol.
 }
 
 // nindentActions suggests converting `| indent N` to `| nindent N`.
-func nindentActions(line, trimmed string, lineIdx int, uri string) []protocol.CodeAction {
+func nindentActions(line string, lineIdx int, uri string) []protocol.CodeAction {
 	var actions []protocol.CodeAction
 
 	matches := indentPipeRegex.FindStringSubmatchIndex(line)
@@ -483,7 +482,7 @@ func nindentActions(line, trimmed string, lineIdx int, uri string) []protocol.Co
 }
 
 // toYamlNindentActions suggests adding `| nindent N` to `toYaml` expressions without it.
-func toYamlNindentActions(line, trimmed string, lineIdx int, uri string) []protocol.CodeAction {
+func toYamlNindentActions(line string, lineIdx int, uri string) []protocol.CodeAction {
 	var actions []protocol.CodeAction
 
 	toYamlNoIndent := regexp.MustCompile(`(\{\{-?\s*toYaml\s+[^\}|]+?)(\s*-?\}\})`)
