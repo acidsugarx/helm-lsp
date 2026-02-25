@@ -190,33 +190,69 @@ func countIndent(line string) int {
 
 // sanitizeKeyForValues converts a YAML key to a valid Go template path segment.
 // For simple keys like "replicas", returns as-is.
-// For annotation-style keys like "kubernetes.io/ingress.class", extracts the
-// meaningful last part and converts to camelCase: "ingressClass".
+// For annotation-style keys like "kubernetes.io/ingress.class" → "ingressClass".
+// For keys with hyphens like "cert-manager.io/cluster-issuer" → "clusterIssuer".
 func sanitizeKeyForValues(key string) string {
-	// If the key is a simple identifier (no dots, slashes), return as-is
-	if !strings.ContainsAny(key, "./") {
+	// If the key is a simple identifier (no dots, slashes, hyphens), return as-is
+	if !strings.ContainsAny(key, "./-") {
 		return key
 	}
 
-	// Split by / and . to get segments
-	// e.g. "kubernetes.io/ingress.class" → ["kubernetes", "io", "ingress", "class"]
-	key = strings.ReplaceAll(key, "/", ".")
-	parts := strings.Split(key, ".")
+	// Normalize all separators to dots
+	normalized := strings.NewReplacer("/", ".", "-", ".").Replace(key)
+	parts := strings.Split(normalized, ".")
 
-	// Take the last 2 meaningful segments and camelCase them
-	// "ingress", "class" → "ingressClass"
-	if len(parts) >= 2 {
-		result := parts[len(parts)-2]
-		for _, p := range parts[len(parts)-1:] {
-			if len(p) > 0 {
-				result += strings.ToUpper(p[:1]) + p[1:]
-			}
-		}
-		return result
+	// Drop common prefixes: kubernetes, io, cert, manager, etc.
+	prefixes := map[string]bool{
+		"kubernetes": true, "io": true, "cert": true, "manager": true,
+		"k8s": true, "nginx": true, "app": true,
 	}
 
-	// Fallback: just use the last segment
-	return parts[len(parts)-1]
+	// Find the first meaningful segment (skip common prefixes)
+	startIdx := 0
+	for startIdx < len(parts)-1 && prefixes[parts[startIdx]] {
+		startIdx++
+	}
+
+	// CamelCase the remaining segments
+	if startIdx >= len(parts) {
+		startIdx = len(parts) - 1
+	}
+
+	result := parts[startIdx]
+	for i := startIdx + 1; i < len(parts); i++ {
+		p := parts[i]
+		if len(p) > 0 {
+			result += strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+
+	return result
+}
+
+// quoteDefault wraps a value in quotes if it's a string (not a number or bool).
+// Go templates need `default "nginx"` not `default nginx` (nginx would be treated as a function).
+func quoteDefault(value string) string {
+	// If it's a number, leave as-is
+	isNumeric := regexp.MustCompile(`^[\d]+(\.\d+)?[mMgGkK]?[iI]?$`).MatchString(value)
+	if isNumeric {
+		return value
+	}
+
+	// If it's a boolean, leave as-is
+	lower := strings.ToLower(value)
+	if lower == "true" || lower == "false" {
+		return value
+	}
+
+	// If already quoted, leave as-is
+	if (strings.HasPrefix(value, "\"") && strings.HasSuffix(value, "\"")) ||
+		(strings.HasPrefix(value, "'") && strings.HasSuffix(value, "'")) {
+		return value
+	}
+
+	// It's a string — wrap in quotes
+	return fmt.Sprintf("%q", value)
 }
 
 // extractToValuesActions suggests extracting a hardcoded value to values.yaml.
@@ -284,7 +320,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 		valuesRef = fmt.Sprintf(".Values.%s", valuesPath)
 	}
 
-	newLine := fmt.Sprintf("%s%s: {{ %s | default %s }}", indent, key, valuesRef, value)
+	newLine := fmt.Sprintf("%s%s: {{ %s | default %s }}", indent, key, valuesRef, quoteDefault(value))
 
 	kind := protocol.CodeActionKindRefactorExtract
 	editChange := protocol.TextDocumentEdit{
