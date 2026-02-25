@@ -188,6 +188,37 @@ func countIndent(line string) int {
 	return len(line) - len(strings.TrimLeft(line, " "))
 }
 
+// sanitizeKeyForValues converts a YAML key to a valid Go template path segment.
+// For simple keys like "replicas", returns as-is.
+// For annotation-style keys like "kubernetes.io/ingress.class", extracts the
+// meaningful last part and converts to camelCase: "ingressClass".
+func sanitizeKeyForValues(key string) string {
+	// If the key is a simple identifier (no dots, slashes), return as-is
+	if !strings.ContainsAny(key, "./") {
+		return key
+	}
+
+	// Split by / and . to get segments
+	// e.g. "kubernetes.io/ingress.class" → ["kubernetes", "io", "ingress", "class"]
+	key = strings.ReplaceAll(key, "/", ".")
+	parts := strings.Split(key, ".")
+
+	// Take the last 2 meaningful segments and camelCase them
+	// "ingress", "class" → "ingressClass"
+	if len(parts) >= 2 {
+		result := parts[len(parts)-2]
+		for _, p := range parts[len(parts)-1:] {
+			if len(p) > 0 {
+				result += strings.ToUpper(p[:1]) + p[1:]
+			}
+		}
+		return result
+	}
+
+	// Fallback: just use the last segment
+	return parts[len(parts)-1]
+}
+
 // extractToValuesActions suggests extracting a hardcoded value to values.yaml.
 // Scope-aware (uses $.Values inside range/with) and YAML-path-aware.
 func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, uri string, scope TemplateScope) []protocol.CodeAction {
@@ -225,12 +256,15 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	// Build YAML path: detect parent keys from indentation
 	parentPath := detectYAMLPath(lines, lineIdx)
 
-	// Build the full values path: parentPath + key
-	// Filter out K8s structural parents to keep paths clean
+	// Sanitize the key for use in Go template paths
+	// e.g. "kubernetes.io/ingress.class" → "ingressClass"
+	sanitizedKey := sanitizeKeyForValues(key)
+
+	// Build the full values path: parentPath + sanitized key
+	// Keep meaningful parents (like "annotations"), filter only K8s structural ones
 	structuralParents := map[string]bool{
 		"metadata": true, "spec": true, "template": true, "containers": true,
-		"data": true, "labels": true, "annotations": true, "selector": true,
-		"matchLabels": true,
+		"selector": true, "matchLabels": true,
 	}
 	var cleanPath []string
 	for _, p := range parentPath {
@@ -238,7 +272,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 			cleanPath = append(cleanPath, p)
 		}
 	}
-	cleanPath = append(cleanPath, key)
+	cleanPath = append(cleanPath, sanitizedKey)
 
 	valuesPath := strings.Join(cleanPath, ".")
 
