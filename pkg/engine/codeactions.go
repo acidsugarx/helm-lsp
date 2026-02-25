@@ -470,6 +470,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	skipFields := map[string]bool{
 		"apiVersion": true, "kind": true, "metadata": true, "spec": true,
 		"status": true, "template": true, "data": true, "type": true,
+		"name": true,
 	}
 	if skipFields[key] {
 		return nil
@@ -482,7 +483,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	// look for a sibling 'name:' field and use it as the values key.
 	// e.g. "- name: APP_ENV\n  value: production" → .Values.appEnv
 	sanitizedKey := sanitizeKeyForValues(key)
-	if key == "value" || key == "name" {
+	if key == "value" {
 		if siblingName := findSiblingName(lines, lineIdx); siblingName != "" {
 			sanitizedKey = envNameToValuesKey(siblingName)
 		}
