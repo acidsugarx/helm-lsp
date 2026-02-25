@@ -268,45 +268,71 @@ func quoteDefault(value string) string {
 }
 
 // findSiblingName looks for a sibling "name:" field in the same YAML list item.
-// It scans up and down from lineIdx within the same indentation block.
-// Returns the name value if found (e.g., "APP_ENV"), or empty string.
+// It explicitly finds the start and end of the current list item block to avoid leaking into other items.
 func findSiblingName(lines []string, lineIdx int) string {
 	if lineIdx >= len(lines) {
 		return ""
 	}
 
-	currentIndent := countIndent(lines[lineIdx])
-	nameRegex := regexp.MustCompile(`^\s*-?\s*name:\s+(.+)$`)
+	startIdx := lineIdx
+	endIdx := lineIdx
+	listItemIndent := -1
 
-	// Scan up (max 5 lines) looking for `name:` at same or parent indent
-	for i := lineIdx - 1; i >= 0 && i >= lineIdx-5; i-- {
+	// 1. Find the start of the list item by scanning UP
+	for i := lineIdx; i >= 0; i-- {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		lineIndent := countIndent(line)
-		// If we hit something at lower indent, we've left the list item
-		if lineIndent < currentIndent-2 {
+
+		indent := countIndent(line)
+
+		// If we find a line starting with '-', this is the start of the item
+		if strings.HasPrefix(trimmed, "-") {
+			startIdx = i
+			listItemIndent = indent
 			break
 		}
-		if m := nameRegex.FindStringSubmatch(line); m != nil {
-			return strings.TrimSpace(m[1])
+
+		// If we hit a line that's less indented and doesn't start with '-', we've left the list
+		if indent < countIndent(lines[lineIdx]) && !strings.HasPrefix(trimmed, "-") && !strings.HasSuffix(trimmed, ":") {
+			// This shouldn't normally happen in well-formed YAML lists without hitting a '-' or parent key
+			// But just in case, we stop
 		}
 	}
 
-	// Scan down (max 3 lines)
-	for i := lineIdx + 1; i < len(lines) && i <= lineIdx+3; i++ {
+	if listItemIndent == -1 {
+		return "" // Not inside a list item
+	}
+
+	// 2. Find the end of the list item by scanning DOWN
+	for i := startIdx + 1; i < len(lines); i++ {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
 			continue
 		}
-		lineIndent := countIndent(line)
-		if lineIndent < currentIndent-2 {
+
+		indent := countIndent(line)
+
+		// If we hit another item at the same indent or a parent key (smaller indent), block ends
+		if indent <= listItemIndent {
+			endIdx = i
 			break
 		}
-		if m := nameRegex.FindStringSubmatch(line); m != nil {
+		endIdx = i
+	}
+
+	if endIdx == startIdx && endIdx < len(lines)-1 {
+		// Just in case it was the last line in the file
+		endIdx = len(lines)
+	}
+
+	// 3. Search within the block for `name:` or `- name:`
+	nameRegex := regexp.MustCompile(`^\s*-?\s*name:\s+(.+)$`)
+	for i := startIdx; i < endIdx && i < len(lines); i++ {
+		if m := nameRegex.FindStringSubmatch(lines[i]); m != nil {
 			return strings.TrimSpace(m[1])
 		}
 	}

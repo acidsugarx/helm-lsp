@@ -34,9 +34,15 @@ spec:
             # ✅ CODE ACTION: "toYaml без nindent"
             {{- toYaml .Values.resources }}
           env:
-            - name: {{ .Values.logLevel | default "APP_ENV" }}
-              # ✅ EXTRACT → .Values.value (under env)
+            # 1. Standard name first, value second
+            - name: APP_ENV
               value: production
+            # 2. Value first, name second
+            - value: "true"
+              name: DEBUG_MODE
+            # 3. Templated name
             - name: {{ .Values.logLevel | default "LOG_LEVEL" }}
-              # ✅ EXTRACT
               value: info
+            # 4. Another standard one to ensure no bleeding
+            - name: DATABASE_URL
+              value: postgres://...
