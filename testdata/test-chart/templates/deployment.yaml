@@ -24,6 +24,7 @@ spec:
       # ✅ EXTRACT → .Values.terminationGracePeriodSeconds
       terminationGracePeriodSeconds: 30
       containers:
+        # --- TEST 1: Hardcoded container ---
         - name: nginx
           image: nginx:1.25
           imagePullPolicy: Always
@@ -31,18 +32,22 @@ spec:
             - containerPort: 8080
               protocol: TCP
           resources:
-            # ✅ CODE ACTION: "toYaml без nindent"
             {{- toYaml .Values.resources }}
           env:
-            # 1. Standard name first, value second
             - name: APP_ENV
               value: production
-            # 2. Value first, name second
             - value: "true"
               name: DEBUG_MODE
-            # 3. Templated name
             - name: {{ .Values.logLevel | default "LOG_LEVEL" }}
               value: info
-            # 4. Another standard one to ensure no bleeding
             - name: DATABASE_URL
               value: postgres://...
+              
+        # --- TEST 2: Range container ---
+        {{- range $name, $c := .Values.extraContainers }}
+        - name: {{ $c.name | default "extra" }}
+          image: busybox:1.36
+          env:
+            - name: MY_SECRET
+              value: super-secret
+        {{- end }}
