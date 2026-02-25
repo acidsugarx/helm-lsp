@@ -267,6 +267,79 @@ func quoteDefault(value string) string {
 	return fmt.Sprintf("%q", value)
 }
 
+// findSiblingName looks for a sibling "name:" field in the same YAML list item.
+// It scans up and down from lineIdx within the same indentation block.
+// Returns the name value if found (e.g., "APP_ENV"), or empty string.
+func findSiblingName(lines []string, lineIdx int) string {
+	if lineIdx >= len(lines) {
+		return ""
+	}
+
+	currentIndent := countIndent(lines[lineIdx])
+	nameRegex := regexp.MustCompile(`^\s*-?\s*name:\s+(.+)$`)
+
+	// Scan up (max 5 lines) looking for `name:` at same or parent indent
+	for i := lineIdx - 1; i >= 0 && i >= lineIdx-5; i-- {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		lineIndent := countIndent(line)
+		// If we hit something at lower indent, we've left the list item
+		if lineIndent < currentIndent-2 {
+			break
+		}
+		if m := nameRegex.FindStringSubmatch(line); m != nil {
+			return strings.TrimSpace(m[1])
+		}
+	}
+
+	// Scan down (max 3 lines)
+	for i := lineIdx + 1; i < len(lines) && i <= lineIdx+3; i++ {
+		line := lines[i]
+		trimmed := strings.TrimSpace(line)
+		if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		lineIndent := countIndent(line)
+		if lineIndent < currentIndent-2 {
+			break
+		}
+		if m := nameRegex.FindStringSubmatch(line); m != nil {
+			return strings.TrimSpace(m[1])
+		}
+	}
+
+	return ""
+}
+
+// envNameToValuesKey converts a K8s env var name to a camelCase values key.
+// Examples:
+//   - "APP_ENV" → "appEnv"
+//   - "LOG_LEVEL" → "logLevel"
+//   - "DATABASE_URL" → "databaseUrl"
+//   - "my-var" → "myVar"
+func envNameToValuesKey(name string) string {
+	// Normalize separators to spaces for word splitting
+	normalized := strings.NewReplacer("_", " ", "-", " ").Replace(name)
+	words := strings.Fields(normalized)
+
+	if len(words) == 0 {
+		return name
+	}
+
+	// First word lowercase, rest Title case
+	result := strings.ToLower(words[0])
+	for _, w := range words[1:] {
+		if len(w) > 0 {
+			result += strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		}
+	}
+
+	return result
+}
+
 // extractToValuesActions suggests extracting a hardcoded value to values.yaml.
 // Scope-aware (uses $.Values inside range/with) and YAML-path-aware.
 func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, uri string, scope TemplateScope) []protocol.CodeAction {
@@ -303,9 +376,15 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	// Build YAML path: detect parent keys from indentation
 	parentPath := detectYAMLPath(lines, lineIdx)
 
-	// Sanitize the key for use in Go template paths
-	// e.g. "kubernetes.io/ingress.class" → "ingressClass"
+	// Smart env var detection: when extracting 'value:' inside an env list item,
+	// look for a sibling 'name:' field and use it as the values key.
+	// e.g. "- name: APP_ENV\n  value: production" → .Values.appEnv
 	sanitizedKey := sanitizeKeyForValues(key)
+	if key == "value" || key == "name" {
+		if siblingName := findSiblingName(lines, lineIdx); siblingName != "" {
+			sanitizedKey = envNameToValuesKey(siblingName)
+		}
+	}
 
 	// Build the full values path: parentPath + sanitized key
 	// Keep meaningful parents (like "annotations"), filter only K8s structural ones
