@@ -41,10 +41,11 @@ func (h *ServerHandler) Initialize(ctx context.Context, params *lsp.InitializePa
 				TriggerCharacters: []string{".", "$."},
 				ResolveProvider:   false,
 			},
-			HoverProvider:          true,
-			DefinitionProvider:     true,
-			ReferencesProvider:     true,
-			DocumentSymbolProvider: true,
+			HoverProvider:              true,
+			DefinitionProvider:         true,
+			ReferencesProvider:         true,
+			DocumentSymbolProvider:     true,
+			DocumentFormattingProvider: true,
 		},
 	}, nil
 }

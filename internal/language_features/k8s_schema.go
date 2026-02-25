@@ -1,6 +1,7 @@
 package languagefeatures
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -126,50 +127,99 @@ func flattenValidationErrors(err *jsonschema.ValidationError) []*jsonschema.Vali
 	return flat
 }
 
-// GetFieldDescription traverses the schema to find the description of a specific property path.
+// knownKindToApiVersion maps common K8s kinds to their apiVersion when the template
+// uses expressions like {{ include "helpers.capabilities.deployment.apiVersion" $ }}.
+var knownKindToApiVersion = map[string]string{
+	"Deployment":              "apps/v1",
+	"StatefulSet":             "apps/v1",
+	"DaemonSet":               "apps/v1",
+	"ReplicaSet":              "apps/v1",
+	"Job":                     "batch/v1",
+	"CronJob":                 "batch/v1",
+	"Ingress":                 "networking.k8s.io/v1",
+	"NetworkPolicy":           "networking.k8s.io/v1",
+	"Service":                 "v1",
+	"ConfigMap":               "v1",
+	"Secret":                  "v1",
+	"ServiceAccount":          "v1",
+	"PersistentVolumeClaim":   "v1",
+	"Pod":                     "v1",
+	"Namespace":               "v1",
+	"HorizontalPodAutoscaler": "autoscaling/v2",
+	"Role":                    "rbac.authorization.k8s.io/v1",
+	"RoleBinding":             "rbac.authorization.k8s.io/v1",
+	"ClusterRole":             "rbac.authorization.k8s.io/v1",
+	"ClusterRoleBinding":      "rbac.authorization.k8s.io/v1",
+}
+
+// ResolveApiVersion returns a valid apiVersion, falling back to the knownKindToApiVersion map
+// if the parsed version contains template expressions.
+func ResolveApiVersion(apiVersion, kind string) string {
+	if apiVersion != "" && !strings.Contains(apiVersion, "{{") {
+		return apiVersion
+	}
+	if fallback, ok := knownKindToApiVersion[kind]; ok {
+		return fallback
+	}
+	return apiVersion
+}
+
+// GetFieldDescription traverses the raw cached JSON schema to find the description
+// of a specific property path. Uses raw JSON instead of the compiled jsonschema.Schema
+// because the compiler loses Description fields on schemas with type arrays like
+// ["object", "null"] used in standalone-strict schemas.
 func (sm *SchemaManager) GetFieldDescription(apiVersion, kind string, path []string) (string, error) {
-	schema, err := sm.getSchema(apiVersion, kind)
-	if err != nil {
-		return "", err
+	// Resolve template apiVersions to real ones
+	apiVersion = ResolveApiVersion(apiVersion, kind)
+
+	// Get the schema ID and cache path
+	apiPrefix := strings.ReplaceAll(apiVersion, "/", "-")
+	schemaID := strings.ToLower(fmt.Sprintf("%s-%s.json", kind, apiPrefix))
+	if !strings.Contains(apiVersion, "/") {
+		schemaID = strings.ToLower(fmt.Sprintf("%s-%s.json", kind, apiVersion))
 	}
 
-	current := schema
+	// Ensure the schema file is cached
+	cachePath := filepath.Join(sm.cacheDir, schemaID)
+	if _, err := os.Stat(cachePath); err != nil {
+		// Trigger download via getSchema (which also caches the file)
+		_, schemaErr := sm.getSchema(apiVersion, kind)
+		if schemaErr != nil {
+			return "", schemaErr
+		}
+	}
+
+	// Read the raw JSON from cache
+	data, err := os.ReadFile(cachePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read schema cache: %w", err)
+	}
+
+	var schemaMap map[string]interface{}
+	if err := json.Unmarshal(data, &schemaMap); err != nil {
+		return "", fmt.Errorf("failed to parse schema JSON: %w", err)
+	}
+
+	// Traverse the path through properties
+	current := schemaMap
 	for _, p := range path {
-		// Resolve refs
-		for current.Ref != nil {
-			current = current.Ref
-		}
-
-		// If current is an array/list, step into its definition
-		if current.Items != nil {
-			if s, ok := current.Items.(*jsonschema.Schema); ok {
-				current = s
-			} else if sArr, ok := current.Items.([]*jsonschema.Schema); ok && len(sArr) > 0 {
-				current = sArr[0]
-			}
-		}
-
-		// Resolve refs again after stepping into Items
-		for current.Ref != nil {
-			current = current.Ref
-		}
-
-		if current.Properties != nil {
-			if next, ok := current.Properties[p]; ok {
-				current = next
-			} else {
-				return "", fmt.Errorf("property %s not found", p)
-			}
-		} else {
+		props, ok := current["properties"].(map[string]interface{})
+		if !ok {
 			return "", fmt.Errorf("no properties at %s", p)
 		}
+		next, ok := props[p].(map[string]interface{})
+		if !ok {
+			return "", fmt.Errorf("property %s not found", p)
+		}
+		current = next
 	}
 
-	for current.Ref != nil {
-		current = current.Ref
+	// Extract description
+	if desc, ok := current["description"].(string); ok {
+		return desc, nil
 	}
 
-	return current.Description, nil
+	return "", nil
 }
 
 // getSchema fetches and caches the K8s schema for a given apiVersion and kind.
@@ -237,9 +287,10 @@ func extractKindAndVersion(node *yaml.Node) (apiVersion, kind string) {
 	for i := 0; i < len(node.Content); i += 2 {
 		key := node.Content[i].Value
 		val := node.Content[i+1].Value
-		if key == "apiVersion" {
+		switch key {
+		case "apiVersion":
 			apiVersion = val
-		} else if key == "kind" {
+		case "kind":
 			kind = val
 		}
 	}

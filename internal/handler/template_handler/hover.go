@@ -20,11 +20,12 @@ func (h *TemplateHandler) Hover(ctx context.Context, params *lsp.HoverParams) (r
 	wordRange := templateast.GetLspRangeForNode(genericDocumentUseCase.Node)
 
 	usecases := []languagefeatures.HoverUseCase{
+		languagefeatures.NewKeywordFeature(genericDocumentUseCase, params.Position),
+		languagefeatures.NewVariablesFeature(genericDocumentUseCase),
 		languagefeatures.NewBuiltInObjectsFeature(genericDocumentUseCase), // has to be before template context
 		languagefeatures.NewTemplateContextFeature(genericDocumentUseCase),
 		languagefeatures.NewIncludesCallFeature(genericDocumentUseCase),
 		languagefeatures.NewFunctionCallFeature(genericDocumentUseCase),
-		languagefeatures.NewK8sSchemaHoverFeature(genericDocumentUseCase, &params.TextDocumentPositionParams),
 	}
 
 	for _, usecase := range usecases {
@@ -35,8 +36,16 @@ func (h *TemplateHandler) Hover(ctx context.Context, params *lsp.HoverParams) (r
 	}
 
 	if genericDocumentUseCase.NodeType == gotemplate.NodeTypeText {
-		// Do not use the TextUsecase, as we don't want to map the hover response
-		// from yamlls to string and then back
+		// Try K8s Schema Hover first (our custom feature)
+		k8sFeature := languagefeatures.NewK8sSchemaHoverFeature(genericDocumentUseCase, &params.TextDocumentPositionParams)
+		if k8sFeature.AppropriateForNode() {
+			k8sResult, k8sErr := k8sFeature.Hover()
+			if k8sErr == nil && k8sResult != "" {
+				return protocol.BuildHoverResponse(k8sResult, wordRange), nil
+			}
+		}
+
+		// Fall back to yamlls hover
 		word := genericDocumentUseCase.Document.WordAt(params.Position)
 		response, err := h.yamllsConnector.CallHoverOrComplete(ctx, *params, word)
 		return response, err

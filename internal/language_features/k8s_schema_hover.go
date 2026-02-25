@@ -21,7 +21,6 @@ func NewK8sSchemaHoverFeature(genericDocumentUseCase *GenericDocumentUseCase, te
 }
 
 func (f *K8sSchemaHoverFeature) AppropriateForNode() bool {
-	// K8s Schema Hover applies to raw YAML text nodes in the template
 	return f.NodeType == gotemplate.NodeTypeText
 }
 
@@ -34,21 +33,31 @@ func (f *K8sSchemaHoverFeature) Hover() (string, error) {
 		return "", fmt.Errorf("invalid line index")
 	}
 
-	wordRange := f.Node
-	if wordRange == nil {
+	if f.Node == nil {
 		return "", fmt.Errorf("no AST node at position")
 	}
 
 	path := DetectYAMLPath(lines, lineIdx)
 	if len(path) == 0 {
-		return "", nil // Not a K8s field match
+		return "", nil
 	}
 
 	apiVersion, kind := FindK8sRoot(lines, lineIdx)
+	apiVersion = ResolveApiVersion(apiVersion, kind)
 	if apiVersion != "" && kind != "" {
 		desc, err := GlobalSchemaManager.GetFieldDescription(apiVersion, kind, path)
 		if err == nil && desc != "" {
-			markdown := fmt.Sprintf("### Kubernetes Field: `%s`\n**%s/%s**\n\n%s", strings.Join(path, "."), apiVersion, kind, desc)
+			markdown := fmt.Sprintf(
+				"### 🔷 `%s`\n\n"+
+					"**%s** · `%s/%s`\n\n"+
+					"---\n\n"+
+					"%s",
+				strings.Join(path, "."),
+				kind,
+				apiVersion,
+				kind,
+				desc,
+			)
 			return markdown, nil
 		}
 	}

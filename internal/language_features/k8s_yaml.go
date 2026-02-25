@@ -36,8 +36,10 @@ var (
 	endBlockRegex    = regexp.MustCompile(`\{\{-?\s*end\s*-?\}\}`)
 	defineBlockRegex = regexp.MustCompile(`\{\{-?\s*define\b`)
 
-	// Matches a YAML key (without value) — for path detection
+	// Matches a YAML key (without value) — for parent path detection
 	yamlKeyOnlyRegex = regexp.MustCompile(`^(\s*)([\w\-\.\/]+):\s*$`)
+	// Matches a YAML key (with or without value) — for current line key extraction
+	yamlKeyAnyRegex = regexp.MustCompile(`^(\s*)([\w\-\.\/]+):`)
 )
 
 // GetCodeActions analyzes the document at the given range and returns applicable code actions.
@@ -147,7 +149,7 @@ func detectScope(lines []string, lineIdx int) TemplateScope {
 }
 
 // DetectYAMLPath scans upward from lineIdx to build the YAML key path.
-// For example, if the cursor is on `replicas: 3` under `spec:`, returns ["spec"].
+// For example, if the cursor is on `replicas: 3` under `spec:`, returns ["spec", "replicas"].
 // Handles nested indentation and skips list items, template lines, and comments.
 func DetectYAMLPath(lines []string, lineIdx int) []string {
 	if lineIdx >= len(lines) {
@@ -159,6 +161,14 @@ func DetectYAMLPath(lines []string, lineIdx int) []string {
 
 	var path []string
 	targetIndent := currentIndent
+
+	// First, extract the current line's key (if it has one)
+	trimmedCurrent := strings.TrimSpace(currentLine)
+	if !strings.HasPrefix(trimmedCurrent, "#") && !strings.HasPrefix(trimmedCurrent, "{{") && !strings.HasPrefix(trimmedCurrent, "- ") && trimmedCurrent != "---" {
+		if m := yamlKeyAnyRegex.FindStringSubmatch(currentLine); m != nil {
+			path = append(path, m[2])
+		}
+	}
 
 	for i := lineIdx - 1; i >= 0; i-- {
 		line := lines[i]
