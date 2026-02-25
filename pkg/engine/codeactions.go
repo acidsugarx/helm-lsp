@@ -315,12 +315,33 @@ func findSiblingName(lines []string, lineIdx int) string {
 }
 
 // envNameToValuesKey converts a K8s env var name to a camelCase values key.
+// It also handles cases where the name is already a template.
 // Examples:
 //   - "APP_ENV" → "appEnv"
 //   - "LOG_LEVEL" → "logLevel"
-//   - "DATABASE_URL" → "databaseUrl"
-//   - "my-var" → "myVar"
+//   - "{{ .Values.logLevel | default \"APP_ENV\" }}" → "logLevel"
+//   - "{{ .Values.appEnv }}" → "appEnv"
 func envNameToValuesKey(name string) string {
+	// If it's a template, extract the variable name if possible
+	if strings.HasPrefix(strings.TrimSpace(name), "{{") {
+		// Look for `.Values.someKey`
+		m := regexp.MustCompile(`\.Values\.([a-zA-Z0-9_]+)`).FindStringSubmatch(name)
+		if len(m) > 1 {
+			return m[1]
+		}
+		// Look for a quoted string default (e.g. `default "APP_ENV"`)
+		m = regexp.MustCompile(`default\s+"([^"]+)"`).FindStringSubmatch(name)
+		if len(m) > 1 {
+			name = m[1]
+		} else {
+			// Fallback: just remove template braces and spaces
+			name = regexp.MustCompile(`[\{\}\|"'\s]`).ReplaceAllString(name, "")
+		}
+	}
+
+	// Remove any remaining quotes
+	name = strings.Trim(name, `"'`)
+
 	// Normalize separators to spaces for word splitting
 	normalized := strings.NewReplacer("_", " ", "-", " ").Replace(name)
 	words := strings.Fields(normalized)

@@ -25,6 +25,7 @@ spec:
       terminationGracePeriodSeconds: 30
       containers:
         - image: nginx:1.25
+          name: nginx
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -33,9 +34,9 @@ spec:
             # ✅ CODE ACTION: "toYaml без nindent"
             {{- toYaml .Values.resources }}
           env:
-            - name: APP_ENV
+            - name: {{ .Values.logLevel | default "APP_ENV" }}
               # ✅ EXTRACT → .Values.value (under env)
               value: production
-            - name: LOG_LEVEL
+            - name: {{ .Values.{{.values.loglevel|Default"appEnv"}} | default "LOG_LEVEL" }}
               # ✅ EXTRACT
               value: info
