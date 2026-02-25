@@ -30,6 +30,9 @@ var (
 
 	// Block detection regexes
 	rangeBlockRegex  = regexp.MustCompile(`\{\{-?\s*range\b`)
+	rangeVarsRegex   = regexp.MustCompile(`range\s+(\$\w+)\s*,\s*(\$\w+)\s*:=`)
+	rangeSimpleRegex = regexp.MustCompile(`range\s+(\$\w+)\s*:=`)
+	withVarRegex     = regexp.MustCompile(`with\s+(\$\w+)\s*:=`)
 	withBlockRegex   = regexp.MustCompile(`\{\{-?\s*with\b`)
 	endBlockRegex    = regexp.MustCompile(`\{\{-?\s*end\s*-?\}\}`)
 	defineBlockRegex = regexp.MustCompile(`\{\{-?\s*define\b`)
@@ -71,11 +74,14 @@ func GetCodeActions(content string, rng protocol.Range, uri string) []protocol.C
 
 // TemplateScope describes the enclosing template scope context for a given line.
 type TemplateScope struct {
-	InRange  bool
-	InWith   bool
-	InDefine bool
-	Depth    int
-	RootRef  string // "$" if inside range/with, "." if at top level
+	InRange     bool
+	InWith      bool
+	InDefine    bool
+	Depth       int
+	RootRef     string // "$" if inside range/with, "." if at top level
+	RangeKeyVar string // e.g. "$name" from `range $name, $ing := ...`
+	RangeValVar string // e.g. "$ing" from `range $name, $ing := ...`
+	WithVar     string // e.g. "$res" from `with $res := ...`
 }
 
 // detectScope scans upward from lineIdx to determine the enclosing template scope.
@@ -103,8 +109,14 @@ func detectScope(lines []string, lineIdx int) TemplateScope {
 				scope.InRange = true
 				scope.Depth++
 				scope.RootRef = "$"
-				log.Printf("CodeAction: detected RANGE at line %d (from line %d)", i, lineIdx)
-				// Don't return — keep scanning for outer scopes
+				// Extract range variables: `range $key, $val := ...`
+				if m := rangeVarsRegex.FindStringSubmatch(trimmed); m != nil {
+					scope.RangeKeyVar = m[1]
+					scope.RangeValVar = m[2]
+				} else if m := rangeSimpleRegex.FindStringSubmatch(trimmed); m != nil {
+					scope.RangeValVar = m[1]
+				}
+				log.Printf("CodeAction: detected RANGE at line %d (key=%s val=%s)", i, scope.RangeKeyVar, scope.RangeValVar)
 			}
 			continue
 		}
@@ -324,35 +336,65 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	newLine := fmt.Sprintf("%s%s: {{ %s | default %s }}", indent, key, valuesRef, quoteDefault(value))
 
 	kind := protocol.CodeActionKindRefactorExtract
-	editChange := protocol.TextDocumentEdit{
-		TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
-			TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri},
-		},
-		Edits: []interface{}{
-			protocol.TextEdit{
-				Range: protocol.Range{
-					Start: protocol.Position{Line: uint32(lineIdx), Character: 0},
-					End:   protocol.Position{Line: uint32(lineIdx), Character: uint32(len(line))},
-				},
-				NewText: newLine,
+
+	// Helper to build a TextDocumentEdit
+	makeEdit := func(newText string) protocol.TextDocumentEdit {
+		return protocol.TextDocumentEdit{
+			TextDocument: protocol.OptionalVersionedTextDocumentIdentifier{
+				TextDocumentIdentifier: protocol.TextDocumentIdentifier{URI: uri},
 			},
-		},
+			Edits: []interface{}{
+				protocol.TextEdit{
+					Range: protocol.Range{
+						Start: protocol.Position{Line: uint32(lineIdx), Character: 0},
+						End:   protocol.Position{Line: uint32(lineIdx), Character: uint32(len(line))},
+					},
+					NewText: newText,
+				},
+			},
+		}
 	}
 
-	title := fmt.Sprintf("Extract '%s' → %s", key, valuesRef)
-	if scope.InRange {
-		title += " (range scope)"
-	} else if scope.InWith {
-		title += " (with scope)"
-	}
-
+	// Action 1: Global extract — $.Values.xxx (same value for all iterations)
+	globalTitle := fmt.Sprintf("Extract → %s (global, same for all)", valuesRef)
 	actions = append(actions, protocol.CodeAction{
-		Title: title,
+		Title: globalTitle,
 		Kind:  &kind,
 		Edit: &protocol.WorkspaceEdit{
-			DocumentChanges: []interface{}{editChange},
+			DocumentChanges: []interface{}{makeEdit(newLine)},
 		},
 	})
+
+	// Action 2: Per-key extract — $var.key (unique per loop item)
+	// Only available inside range blocks with a value variable
+	if scope.InRange && scope.RangeValVar != "" {
+		perKeyRef := fmt.Sprintf("%s.%s", scope.RangeValVar, sanitizedKey)
+		perKeyLine := fmt.Sprintf("%s%s: {{ %s }}", indent, key, perKeyRef)
+		perKeyTitle := fmt.Sprintf("Extract → %s (per-item from loop)", perKeyRef)
+
+		actions = append(actions, protocol.CodeAction{
+			Title: perKeyTitle,
+			Kind:  &kind,
+			Edit: &protocol.WorkspaceEdit{
+				DocumentChanges: []interface{}{makeEdit(perKeyLine)},
+			},
+		})
+	}
+
+	// For with blocks, offer access via . (rebound context)
+	if scope.InWith && !scope.InRange {
+		withRef := fmt.Sprintf(".%s", sanitizedKey)
+		withLine := fmt.Sprintf("%s%s: {{ %s }}", indent, key, withRef)
+		withTitle := fmt.Sprintf("Extract → %s (from with context)", withRef)
+
+		actions = append(actions, protocol.CodeAction{
+			Title: withTitle,
+			Kind:  &kind,
+			Edit: &protocol.WorkspaceEdit{
+				DocumentChanges: []interface{}{makeEdit(withLine)},
+			},
+		})
+	}
 
 	return actions
 }
