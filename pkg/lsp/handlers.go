@@ -359,3 +359,53 @@ func inMapPathIntf(m map[interface{}]interface{}, key string) bool {
 	_, ok := m[key]
 	return ok
 }
+
+// executeCommand handles custom LSP commands.
+// Currently supports: "helm.renderPreview" — renders the current template and returns YAML.
+func (s *Server) executeCommand(context *glsp.Context, params *protocol.ExecuteCommandParams) (interface{}, error) {
+	switch params.Command {
+	case "helm.renderPreview":
+		// Expect args[0] to be the document URI
+		if len(params.Arguments) == 0 {
+			return nil, fmt.Errorf("helm.renderPreview requires a document URI argument")
+		}
+
+		uri, ok := params.Arguments[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("helm.renderPreview: argument must be a string URI")
+		}
+
+		content, ok := s.Store.Get(uri)
+		if !ok {
+			// Try reading from disk
+			filePath := uriToPath(uri)
+			data, err := os.ReadFile(filePath)
+			if err != nil {
+				return nil, fmt.Errorf("document not found: %s", uri)
+			}
+			content = string(data)
+		}
+
+		filePath := uriToPath(uri)
+		chartRoot := findChartRoot(filepath.Dir(filePath))
+		if chartRoot == "" {
+			return nil, fmt.Errorf("no Chart.yaml found for %s", uri)
+		}
+
+		rendered, err := engine.RenderPreview(chartRoot, uri, content)
+		if err != nil {
+			return map[string]interface{}{
+				"error":   err.Error(),
+				"content": "",
+			}, nil
+		}
+
+		return map[string]interface{}{
+			"content": rendered,
+			"error":   "",
+		}, nil
+
+	default:
+		return nil, fmt.Errorf("unknown command: %s", params.Command)
+	}
+}

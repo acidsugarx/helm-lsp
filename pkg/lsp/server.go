@@ -24,17 +24,18 @@ func NewServer() *Server {
 	}
 
 	handler := &protocol.Handler{
-		Initialize:             s.initialize,
-		Initialized:            s.initialized,
-		Shutdown:               s.shutdown,
-		SetTrace:               s.setTrace,
-		TextDocumentDidOpen:    s.textDocumentDidOpen,
-		TextDocumentDidChange:  s.textDocumentDidChange,
-		TextDocumentDidClose:   s.textDocumentDidClose,
-		TextDocumentDidSave:    s.textDocumentDidSave,
-		TextDocumentCompletion: s.textDocumentCompletion,
-		TextDocumentDefinition: s.textDocumentDefinition,
-		TextDocumentHover:      s.textDocumentHover,
+		Initialize:              s.initialize,
+		Initialized:             s.initialized,
+		Shutdown:                s.shutdown,
+		SetTrace:                s.setTrace,
+		TextDocumentDidOpen:     s.textDocumentDidOpen,
+		TextDocumentDidChange:   s.textDocumentDidChange,
+		TextDocumentDidClose:    s.textDocumentDidClose,
+		TextDocumentDidSave:     s.textDocumentDidSave,
+		TextDocumentCompletion:  s.textDocumentCompletion,
+		TextDocumentDefinition:  s.textDocumentDefinition,
+		TextDocumentHover:       s.textDocumentHover,
+		WorkspaceExecuteCommand: s.executeCommand,
 	}
 	s.Handler = handler
 
@@ -63,6 +64,11 @@ func (s *Server) initialize(context *glsp.Context, params *protocol.InitializePa
 	// Register handlers capabilities
 	capabilities.DefinitionProvider = true
 	capabilities.HoverProvider = true
+
+	// Custom commands
+	capabilities.ExecuteCommandProvider = &protocol.ExecuteCommandOptions{
+		Commands: []string{"helm.renderPreview"},
+	}
 
 	version := "0.1.0"
 	return protocol.InitializeResult{
