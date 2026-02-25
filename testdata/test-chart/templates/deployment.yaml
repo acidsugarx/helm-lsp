@@ -24,8 +24,8 @@ spec:
       # ✅ EXTRACT → .Values.terminationGracePeriodSeconds
       terminationGracePeriodSeconds: 30
       containers:
-        - image: nginx:1.25
-          name: nginx
+        - name: nginx
+          image: nginx:1.25
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -37,6 +37,6 @@ spec:
             - name: {{ .Values.logLevel | default "APP_ENV" }}
               # ✅ EXTRACT → .Values.value (under env)
               value: production
-            - name: {{ .Values.{{.values.loglevel|Default"appEnv"}} | default "LOG_LEVEL" }}
+            - name: {{ .Values.logLevel | default "LOG_LEVEL" }}
               # ✅ EXTRACT
               value: info

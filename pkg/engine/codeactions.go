@@ -319,23 +319,24 @@ func findSiblingName(lines []string, lineIdx int) string {
 // Examples:
 //   - "APP_ENV" → "appEnv"
 //   - "LOG_LEVEL" → "logLevel"
-//   - "{{ .Values.logLevel | default \"APP_ENV\" }}" → "logLevel"
+//   - "{{ .Values.logLevel | default \"APP_ENV\" }}" → "appEnv"
 //   - "{{ .Values.appEnv }}" → "appEnv"
 func envNameToValuesKey(name string) string {
 	// If it's a template, extract the variable name if possible
 	if strings.HasPrefix(strings.TrimSpace(name), "{{") {
-		// Look for `.Values.someKey`
-		m := regexp.MustCompile(`\.Values\.([a-zA-Z0-9_]+)`).FindStringSubmatch(name)
-		if len(m) > 1 {
-			return m[1]
-		}
-		// Look for a quoted string default (e.g. `default "APP_ENV"`)
-		m = regexp.MustCompile(`default\s+"([^"]+)"`).FindStringSubmatch(name)
+		// Prefer a quoted string default (e.g. `default "APP_ENV"`)
+		m := regexp.MustCompile(`default\s+"([^"]+)"`).FindStringSubmatch(name)
 		if len(m) > 1 {
 			name = m[1]
 		} else {
-			// Fallback: just remove template braces and spaces
-			name = regexp.MustCompile(`[\{\}\|"'\s]`).ReplaceAllString(name, "")
+			// Look for `.Values.someKey`
+			m = regexp.MustCompile(`\.Values\.([a-zA-Z0-9_]+)`).FindStringSubmatch(name)
+			if len(m) > 1 {
+				name = m[1]
+			} else {
+				// Fallback: just remove template braces and spaces
+				name = regexp.MustCompile(`[\{\}\|"'\s]`).ReplaceAllString(name, "")
+			}
 		}
 	}
 
@@ -381,8 +382,11 @@ func findContainerName(lines []string, lineIdx int) string {
 	currentIndent := countIndent(lines[lineIdx])
 	nameWithDashRegex := regexp.MustCompile(`^\s*-\s+name:\s+(.+)$`)
 
+	lastSeenName := ""
+	lastSeenIndent := 999
+
 	// Scan upward looking for `- name:` that starts a container list item
-	for i := lineIdx - 1; i >= 0 && i >= lineIdx-30; i-- {
+	for i := lineIdx - 1; i >= 0 && i >= lineIdx-50; i-- {
 		line := lines[i]
 		trimmed := strings.TrimSpace(line)
 
@@ -394,16 +398,17 @@ func findContainerName(lines []string, lineIdx int) string {
 
 		// If we hit `containers:` itself, stop
 		if strings.TrimSpace(line) == "containers:" {
-			break
+			return lastSeenName
 		}
 
 		// Look for `- name:` at a lower indent (the start of the container item)
 		if lineIndent < currentIndent {
 			if m := nameWithDashRegex.FindStringSubmatch(line); m != nil {
-				name := strings.TrimSpace(m[1])
-				// Make sure it's not an env name (env names are deeper indented)
-				// Container names are at the containers list level
-				return name
+				// We want the name with the smallest indent before reaching containers:
+				if lineIndent < lastSeenIndent {
+					lastSeenName = strings.TrimSpace(m[1])
+					lastSeenIndent = lineIndent
+				}
 			}
 		}
 	}
