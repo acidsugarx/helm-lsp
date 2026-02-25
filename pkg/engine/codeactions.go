@@ -19,8 +19,8 @@ var CodeActionKinds = []protocol.CodeActionKind{
 // Pre-compiled regexes for code actions
 var (
 	// Matches YAML keys including annotations with dots, slashes, etc.
-	// e.g. "  replicas: 3", "    kubernetes.io/ingress.class: nginx"
-	yamlKVRegex = regexp.MustCompile(`^(\s*)([\w\-\.\/]+):\s+(.+)$`)
+	// e.g. "  replicas: 3", "    kubernetes.io/ingress.class: nginx", "    - name: APP_ENV"
+	yamlKVRegex = regexp.MustCompile(`^(\s*(?:-\s+)?)([\w\-\.\/]+):\s+(.+)$`)
 
 	// Matches template expressions for quote suggestion
 	quoteRegex = regexp.MustCompile(`(\{\{-?\s*(?:\$\.|\.)[^\}]+?)(\s*-?\}\})`)
@@ -296,7 +296,6 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	skipFields := map[string]bool{
 		"apiVersion": true, "kind": true, "metadata": true, "spec": true,
 		"status": true, "template": true, "data": true, "type": true,
-		"name": true,
 	}
 	if skipFields[key] {
 		return nil
@@ -313,7 +312,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	// Keep meaningful parents (like "annotations"), filter only K8s structural ones
 	structuralParents := map[string]bool{
 		"metadata": true, "spec": true, "template": true, "containers": true,
-		"selector": true, "matchLabels": true, "data": true,
+		"selector": true, "matchLabels": true, "data": true, "env": true,
 	}
 	var cleanPath []string
 	for _, p := range parentPath {
