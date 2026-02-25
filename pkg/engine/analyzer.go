@@ -89,10 +89,11 @@ func ResolveValuesPath(lines []string, lineIdx int, word string) ([]string, bool
 			valVar := matchesKV[2]
 			valuesPath := matchesKV[3]
 
-			if varName == keyVar {
+			switch varName {
+			case keyVar:
 				// The word is the KEY of the map
 				return strings.Split(valuesPath, "."), true, true
-			} else if varName == valVar {
+			case valVar:
 				// The word is the VALUE of the map
 				basePath := strings.Split(valuesPath, ".")
 				if len(parts) > 1 && parts[1] != "" {

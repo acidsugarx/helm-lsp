@@ -4,6 +4,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/acidsugarx/helm-lsp/pkg/engine"
 	"github.com/tliron/glsp"
 	protocol "github.com/tliron/glsp/protocol_3_16"
 	"github.com/tliron/glsp/server"
@@ -35,6 +36,8 @@ func NewServer() *Server {
 		TextDocumentCompletion:  s.textDocumentCompletion,
 		TextDocumentDefinition:  s.textDocumentDefinition,
 		TextDocumentHover:       s.textDocumentHover,
+		TextDocumentFormatting:  s.textDocumentFormatting,
+		TextDocumentCodeAction:  s.textDocumentCodeAction,
 		WorkspaceExecuteCommand: s.executeCommand,
 	}
 	s.Handler = handler
@@ -64,6 +67,10 @@ func (s *Server) initialize(context *glsp.Context, params *protocol.InitializePa
 	// Register handlers capabilities
 	capabilities.DefinitionProvider = true
 	capabilities.HoverProvider = true
+	capabilities.DocumentFormattingProvider = true
+	capabilities.CodeActionProvider = &protocol.CodeActionOptions{
+		CodeActionKinds: engine.CodeActionKinds,
+	}
 
 	// Custom commands
 	capabilities.ExecuteCommandProvider = &protocol.ExecuteCommandOptions{

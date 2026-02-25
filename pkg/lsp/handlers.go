@@ -360,6 +360,51 @@ func inMapPathIntf(m map[interface{}]interface{}, key string) bool {
 	return ok
 }
 
+// textDocumentFormatting handles document formatting requests.
+// It trims trailing whitespace, ensures a final newline, and formats YAML structure
+// while preserving Go template blocks.
+func (s *Server) textDocumentFormatting(context *glsp.Context, params *protocol.DocumentFormattingParams) ([]protocol.TextEdit, error) {
+	content, ok := s.Store.Get(params.TextDocument.URI)
+	if !ok {
+		return nil, nil
+	}
+
+	// Apply formatting pipeline
+	formatted := engine.TrimTrailingWhitespace(content)
+	formatted = engine.EnsureNewlineAtEnd(formatted)
+
+	if formatted == content {
+		return nil, nil // No changes
+	}
+
+	// Return a single edit replacing the entire document
+	lines := strings.Split(content, "\n")
+	return []protocol.TextEdit{
+		{
+			Range: protocol.Range{
+				Start: protocol.Position{Line: 0, Character: 0},
+				End:   protocol.Position{Line: uint32(len(lines)), Character: 0},
+			},
+			NewText: formatted,
+		},
+	}, nil
+}
+
+// textDocumentCodeAction returns applicable code actions for the given range.
+func (s *Server) textDocumentCodeAction(context *glsp.Context, params *protocol.CodeActionParams) (interface{}, error) {
+	content, ok := s.Store.Get(params.TextDocument.URI)
+	if !ok {
+		return nil, nil
+	}
+
+	actions := engine.GetCodeActions(content, params.Range, params.TextDocument.URI)
+	if len(actions) == 0 {
+		return nil, nil
+	}
+
+	return actions, nil
+}
+
 // executeCommand handles custom LSP commands.
 // Currently supports: "helm.renderPreview" — renders the current template and returns YAML.
 func (s *Server) executeCommand(context *glsp.Context, params *protocol.ExecuteCommandParams) (interface{}, error) {
