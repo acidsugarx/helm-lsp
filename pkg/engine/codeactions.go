@@ -233,8 +233,9 @@ func sanitizeKeyForValues(key string) string {
 // quoteDefault wraps a value in quotes if it's a string (not a number or bool).
 // Go templates need `default "nginx"` not `default nginx` (nginx would be treated as a function).
 func quoteDefault(value string) string {
-	// If it's a number, leave as-is
-	isNumeric := regexp.MustCompile(`^[\d]+(\.\d+)?[mMgGkK]?[iI]?$`).MatchString(value)
+	// If it's a pure integer or float (Go template-valid), leave as-is
+	// K8s quantities like 500m, 256Mi are NOT valid Go numbers — they must be quoted
+	isNumeric := regexp.MustCompile(`^\d+(\.\d+)?$`).MatchString(value)
 	if isNumeric {
 		return value
 	}
@@ -300,7 +301,7 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	// Keep meaningful parents (like "annotations"), filter only K8s structural ones
 	structuralParents := map[string]bool{
 		"metadata": true, "spec": true, "template": true, "containers": true,
-		"selector": true, "matchLabels": true,
+		"selector": true, "matchLabels": true, "data": true,
 	}
 	var cleanPath []string
 	for _, p := range parentPath {
