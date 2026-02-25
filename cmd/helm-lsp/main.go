@@ -4,8 +4,25 @@ import (
 	"log"
 	"os"
 
-	"github.com/acidsugarx/helm-lsp/pkg/lsp"
+	"github.com/acidsugarx/helm-lsp/internal/handler"
 )
+
+type stdIODev struct{}
+
+func (stdIODev) Read(p []byte) (int, error) {
+	return os.Stdin.Read(p)
+}
+
+func (stdIODev) Write(p []byte) (int, error) {
+	return os.Stdout.Write(p)
+}
+
+func (stdIODev) Close() error {
+	if err := os.Stdin.Close(); err != nil {
+		return err
+	}
+	return os.Stdout.Close()
+}
 
 func main() {
 	// Configure logging to a file to avoid polluting stdout (LSP JSON-RPC)
@@ -17,10 +34,5 @@ func main() {
 	}
 	log.Println("Starting helm-lsp...")
 
-	srv := lsp.NewServer()
-
-	if err := srv.Run(); err != nil {
-		log.Printf("LSP server stopped with error: %v\n", err)
-		os.Exit(1)
-	}
+	handler.StartHandler(stdIODev{})
 }

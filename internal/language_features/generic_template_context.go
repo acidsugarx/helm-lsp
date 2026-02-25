@@ -1,0 +1,41 @@
+package languagefeatures
+
+import (
+	"fmt"
+
+	helmdocs "github.com/acidsugarx/helm-lsp/internal/documentation/helm"
+	"github.com/acidsugarx/helm-lsp/internal/lsp/symboltable"
+	"github.com/acidsugarx/helm-lsp/internal/util"
+	lsp "go.lsp.dev/protocol"
+)
+
+type GenericTemplateContextFeature struct {
+	*GenericDocumentUseCase
+}
+
+func (f *GenericTemplateContextFeature) getTemplateContext() (symboltable.TemplateContext, error) {
+	return f.GenericDocumentUseCase.Document.SymbolTable.GetTemplateContext(f.Node.Range())
+}
+
+func (f *GenericTemplateContextFeature) getReferencesFromSymbolTable(templateContext symboltable.TemplateContext) []lsp.Location {
+	locations := []lsp.Location{}
+
+	for _, doc := range f.GenericDocumentUseCase.DocumentStore.GetAllTemplateDocs() {
+		// TODO(dependecy-charts): template context would need to be adjusted for dependency charts
+		// see https://github.com/acidsugarx/helm-lsp/issues/152
+		referenceRanges := doc.SymbolTable.GetTemplateContextRanges(templateContext)
+		locations = append(locations, util.RangesToLocations(doc.URI, referenceRanges)...)
+	}
+
+	return locations
+}
+
+func (f *GenericTemplateContextFeature) builtInOjectDocsLookup(key string, docs []helmdocs.HelmDocumentation) (helmdocs.HelmDocumentation, error) {
+	for _, item := range docs {
+		if key == item.Name {
+			return item, nil
+		}
+	}
+
+	return helmdocs.HelmDocumentation{}, fmt.Errorf("key <%s> not found on built-in object", key)
+}
