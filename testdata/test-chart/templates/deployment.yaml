@@ -2,38 +2,29 @@
 # =============================================
 # TEST CHART — Code Actions Playground
 # =============================================
-# Каждая секция помечена, какой Code Action должен сработать.
-# Поставь курсор на помеченную строку → <leader>la
+# Поставь курсор на строку ПОД комментарием → <leader>la
 # =============================================
 
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  # ✅ CODE ACTION: "Add | quote" — нет | quote
-  name: {{ .Values.service.type }}
   labels:
     # ✅ CODE ACTION: "indent → nindent"
     {{- include "test-chart.labels" . | indent 4 }}
 spec:
-  replicas: {{ ..Values.replicas | default 3 }}
-  # ✅ CODE ACTION: ещё один Extract
-  minReadySeconds: {{ ..Values.minReadySeconds | default 10 }}
+  # ✅ EXTRACT → .Values.replicas
+  replicas: 3
+  # ✅ EXTRACT → .Values.minReadySeconds
+  minReadySeconds: 10
   selector:
     matchLabels:
-      app: {{ ..Values.app | default my-app }}
+      app: my-app
   template:
-    metadata:
-      labels:
-        app: my-app
     spec:
-      # ✅ CODE ACTION: Extract — простой хардкод
+      # ✅ EXTRACT → .Values.terminationGracePeriodSeconds
       terminationGracePeriodSeconds: 30
       containers:
-        - # ✅ CODE ACTION: Extract
-          name: web-server
-          # ✅ CODE ACTION: Extract
-          image: nginx:1.25
-          # ✅ CODE ACTION: Extract
+        - image: nginx:1.25
           imagePullPolicy: Always
           ports:
             - containerPort: 8080
@@ -43,8 +34,8 @@ spec:
             {{- toYaml .Values.resources }}
           env:
             - name: APP_ENV
-              # ✅ CODE ACTION: Extract
+              # ✅ EXTRACT → .Values.value (under env)
               value: production
             - name: LOG_LEVEL
-              # ✅ CODE ACTION: Extract
+              # ✅ EXTRACT
               value: info

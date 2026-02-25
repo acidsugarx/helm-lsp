@@ -1,8 +1,6 @@
 ---
 # =============================================
-# TEST — Code Actions INSIDE range/with blocks
-# =============================================
-# Тут Extract должен использовать $.Values вместо .Values
+# TEST — INSIDE range block
 # =============================================
 
 {{- range $name, $ing := .Values.ingresses }}
@@ -12,9 +10,9 @@ kind: Ingress
 metadata:
   name: {{ $name }}
   annotations:
-    # ✅ CODE ACTION: Extract INSIDE RANGE → $.Values (не .Values!)
+    # ✅ EXTRACT inside RANGE → $.Values... (annotation key with dots/slashes)
     kubernetes.io/ingress.class: nginx
-    # ✅ CODE ACTION: ещё один Extract inside range
+    # ✅ EXTRACT inside RANGE
     cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   rules:
@@ -25,14 +23,13 @@ spec:
             pathType: Prefix
             backend:
               service:
-                name: {{ $name }}
-                # ✅ CODE ACTION: Extract inside range
+                # ✅ EXTRACT inside RANGE
                 port: 80
 {{- end }}
 
 ---
 # =============================================
-# TEST — Code Actions INSIDE with block
+# TEST — INSIDE with block
 # =============================================
 
 {{- with .Values.resources }}
@@ -41,15 +38,15 @@ kind: ConfigMap
 metadata:
   name: resource-info
 data:
-  # ✅ CODE ACTION: Extract INSIDE WITH → $.Values (не .Values!)
+  # ✅ EXTRACT inside WITH → $.Values...
   maxCpu: 500m
-  # ✅ CODE ACTION: ещё один Extract inside with
+  # ✅ EXTRACT inside WITH
   maxMemory: 256Mi
 {{- end }}
 
 ---
 # =============================================
-# TEST — NESTED range inside with
+# TEST — NESTED: with + range
 # =============================================
 
 {{- with .Values.ingresses }}
@@ -60,9 +57,9 @@ kind: ConfigMap
 metadata:
   name: {{ $name }}-config
 data:
-  # ✅ CODE ACTION: Extract DOUBLE NESTED (with + range) → $.Values
+  # ✅ EXTRACT DOUBLE NESTED → $.Values...
   defaultTimeout: 30s
-  # ✅ CODE ACTION: "Add | quote" — $.Values без quote
+  # ✅ "Add | quote" — $.Values без quote
   host: {{ $.Values.service.type }}
   {{- end }}
 {{- end }}
