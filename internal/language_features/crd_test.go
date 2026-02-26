@@ -59,7 +59,7 @@ func TestCRDHoverIntegration(t *testing.T) {
 		t.Fatalf("GetFieldDescription failed: %v", err)
 	}
 
-	expected := "РАБОТАЕТ: The cron schedule, e.g. * * * * *"
+	expected := "The cron schedule, e.g. * * * * *"
 	if desc != expected {
 		t.Errorf("Expected hover description %q, got %q", expected, desc)
 	}
@@ -71,7 +71,7 @@ func TestCRDHoverIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetFieldDescription failed for image: %v", err)
 	}
-	expectedImage := "РАБОТАЕТ: The container image to run"
+	expectedImage := "The container image to run"
 	if descImage != expectedImage {
 		t.Errorf("Expected hover description %q, got %q", expectedImage, descImage)
 	}

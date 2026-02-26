@@ -18,10 +18,10 @@ spec:
               properties:
                 cronSpec:
                   type: string
-                  description: "РАБОТАЕТ: The cron schedule, e.g. * * * * *"
+                  description: "The cron schedule, e.g. * * * * *"
                 image:
                   type: string
-                  description: "РАБОТАЕТ: The container image to run"
+                  description: "The container image to run"
                 replicas:
                   type: integer
                   description: "Number of replicas"
