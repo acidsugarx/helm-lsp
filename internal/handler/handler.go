@@ -2,12 +2,16 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/acidsugarx/helm-lsp/internal/charts"
 	templatehandler "github.com/acidsugarx/helm-lsp/internal/handler/template_handler"
 	yamlhandler "github.com/acidsugarx/helm-lsp/internal/handler/yaml_handler"
+	helmlint "github.com/acidsugarx/helm-lsp/internal/helm_lint"
 	"github.com/acidsugarx/helm-lsp/internal/lsp/document"
 	"github.com/acidsugarx/helm-lsp/internal/util"
 	"go.lsp.dev/jsonrpc2"
@@ -15,6 +19,7 @@ import (
 	lsp "go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"go.uber.org/zap"
+	"helm.sh/helm/v3/pkg/chartutil"
 
 	"github.com/acidsugarx/helm-lsp/internal/log"
 )
@@ -81,8 +86,14 @@ func (h *ServerHandler) setClient(client protocol.Client) {
 
 // CodeAction implements protocol.Server.
 func (h *ServerHandler) CodeAction(ctx context.Context, params *lsp.CodeActionParams) (result []lsp.CodeAction, err error) {
-	logger.Error("Code action unimplemented")
-	return nil, nil
+	logger.Debug("Running CodeAction with params", params)
+
+	handler, err := h.selectLangHandler(ctx, params.TextDocument.URI)
+	if err != nil {
+		logger.Error("Error selecting lang handler for code action", err)
+		return nil, err
+	}
+	return handler.CodeAction(ctx, params)
 }
 
 // CodeLens implements protocol.Server.
@@ -153,8 +164,63 @@ func (h *ServerHandler) DocumentLinkResolve(ctx context.Context, params *lsp.Doc
 
 // ExecuteCommand implements protocol.Server.
 func (h *ServerHandler) ExecuteCommand(ctx context.Context, params *lsp.ExecuteCommandParams) (result interface{}, err error) {
-	logger.Error("Execute command unimplemented")
+	if params.Command == "helm.renderPreview" || params.Command == "helm.renderFullPreview" {
+		if len(params.Arguments) == 0 {
+			logger.Error("ExecuteCommand requires a document URI as argument")
+			return nil, fmt.Errorf("ExecuteCommand requires a document URI as argument")
+		}
+
+		uriStr, ok := params.Arguments[0].(string)
+		if !ok {
+			return nil, fmt.Errorf("ExecuteCommand argument must be a string URI")
+		}
+		documentURI, err := uri.Parse(uriStr)
+		if err != nil {
+			return nil, err
+		}
+
+		doc, ok := h.documents.GetTemplateDoc(documentURI)
+		if !ok {
+			return nil, fmt.Errorf("document not found in store")
+		}
+
+		ch, err := h.chartStore.GetChartForDoc(documentURI)
+		if err != nil {
+			return nil, err
+		}
+
+		vals := ch.ValuesFiles.MainValuesFile.Values
+		for _, additionalFile := range ch.ValuesFiles.AdditionalValuesFiles {
+			vals = chartutil.CoalesceTables(additionalFile.Values, vals)
+		}
+		if ch.ValuesFiles.OverlayValuesFile != nil {
+			vals = chartutil.CoalesceTables(ch.ValuesFiles.OverlayValuesFile.Values, vals)
+		}
+
+		manifest, err := helmlint.VirtualRenderString(ch, doc, vals)
+		if err != nil {
+			logger.Error("VirtualRenderString failed", err)
+			return err.Error(), nil // Print the Helm template error directly into the split!
+		}
+
+		if params.Command == "helm.renderPreview" {
+			single := extractSingleFilePreview(manifest, filepath.Base(documentURI.Filename()))
+			return single, nil
+		}
+		return manifest, nil
+	}
+	logger.Error("Execute command unimplemented for " + params.Command)
 	return nil, nil
+}
+
+func extractSingleFilePreview(manifest string, baseFilename string) string {
+	parts := strings.Split(manifest, "---")
+	for _, part := range parts {
+		if strings.Contains(part, "# Source: ") && strings.Contains(part, baseFilename) {
+			return strings.TrimSpace(part)
+		}
+	}
+	return "No rendered output found for " + baseFilename
 }
 
 // Exit implements protocol.Server.

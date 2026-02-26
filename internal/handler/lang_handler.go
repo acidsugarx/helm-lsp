@@ -17,6 +17,7 @@ type LangHandler interface {
 	Definition(ctx context.Context, params *lsp.DefinitionParams) (result []lsp.Location, err error)
 	DocumentSymbol(ctx context.Context, params *lsp.DocumentSymbolParams) (result []interface{}, err error)
 	Formatting(ctx context.Context, params *lsp.DocumentFormattingParams) (result []lsp.TextEdit, err error)
+	CodeAction(ctx context.Context, params *lsp.CodeActionParams) (result []lsp.CodeAction, err error)
 
 	// DidOpen is called when a document is opened. This function has to add the document to the document store
 	DidOpen(ctx context.Context, params *lsp.DidOpenTextDocumentParams, helmlsConfig util.HelmlsConfiguration) (err error)

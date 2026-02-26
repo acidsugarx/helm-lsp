@@ -26,8 +26,11 @@ func GetDiagnosticsNotifications(chart *charts.Chart, doc *document.TemplateDocu
 	}
 
 	vals := chart.ValuesFiles.MainValuesFile.Values
+	for _, additionalFile := range chart.ValuesFiles.AdditionalValuesFiles {
+		vals = chartutil.CoalesceTables(additionalFile.Values, vals)
+	}
 	if chart.ValuesFiles.OverlayValuesFile != nil {
-		vals = chartutil.CoalesceTables(chart.ValuesFiles.OverlayValuesFile.Values, chart.ValuesFiles.MainValuesFile.Values)
+		vals = chartutil.CoalesceTables(chart.ValuesFiles.OverlayValuesFile.Values, vals)
 	}
 
 	// Use our blazing-fast in-memory Virtual Renderer instead of helm lint OS command

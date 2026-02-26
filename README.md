@@ -1,6 +1,6 @@
 # Helm Upgraded LSP
 
-An enhanced Helm Language Server Protocol (LSP) built on top of the official [`helm-ls`](https://github.com/mrjosh/helm-ls) architecture, adding Kubernetes-aware intelligence and advanced hover features.
+An enhanced Helm Language Server Protocol (LSP) built on top of the official [`helm-ls`](https://github.com/mrjosh/helm-ls) architecture, adding Kubernetes-aware intelligence, advanced hover features, code actions, and live chart preview.
 
 ## ✨ Features
 
@@ -14,26 +14,62 @@ An enhanced Helm Language Server Protocol (LSP) built on top of the official [`h
 | **Keyword Hover** | Hover over `if` / `range` / `with` / `end` / `not` / `and` / `or` → syntax reference |
 | **Template-aware YAML Formatting** | Formats YAML while preserving `{{ }}` template blocks (**BETA** - see below) |
 | **Template apiVersion Resolution** | Automatically resolves `{{ include "helpers.capabilities..." }}` to the correct apiVersion using kind inference |
+| **Code Actions (AST)** | Tree-sitter AST-based code actions: Extract to `values.yaml`, wrap with `\| quote`, `indent` → `nindent` |
+| **Helm Render Preview** | Renders the current template (or full chart) and opens result in a split buffer |
+| **Multi-Values Support** | Coalesces `values.yaml` + all `values*.yaml` files when rendering and linting |
+| **Real-time Helm Lint** | Virtual in-memory render on every keystroke — shows Helm template errors as diagnostics |
+
+### Code Actions
+
+Intelligent code actions triggered on the current cursor position:
+
+| Action | Trigger | Description |
+|--------|---------|-------------|
+| **Extract to Values** | On a `key: literal-value` YAML line | Moves the value to `values.yaml` and replaces it with a `{{ .Values.key }}` reference |
+| **Add `\| quote`** | On a `{{ .Values.xxx }}` expression | Wraps the expression with `\| quote` for YAML string safety |
+| **`indent` → `nindent`** | On a `\| indent N` pipeline | Converts to `\| nindent N` (adds leading newline) |
+| **`toYaml` + `nindent`** | On a `\| toYaml` pipeline | Appends `\| nindent N` to the pipeline |
+
+### Helm Render Preview
+
+Two LSP commands available via `workspace/executeCommand`:
+
+| Command | Description |
+|---------|-------------|
+| `helm.renderPreview` | Renders only the **current file** and shows YAML in a split buffer |
+| `helm.renderFullPreview` | Renders the **entire chart** and shows all manifests in a split buffer |
+
+If the chart fails to render (e.g. missing values, template syntax error), the error text is shown in the split buffer instead of YAML — making it easy to diagnose what went wrong without leaving Neovim.
+
+Example Neovim keybindings:
+```lua
+vim.keymap.set('n', '<leader>hr', function()
+  local uri = vim.uri_from_bufnr(0)
+  vim.lsp.buf.execute_command({ command = 'helm.renderPreview', arguments = { uri } })
+end, { desc = 'Helm Render Preview' })
+
+vim.keymap.set('n', '<leader>hR', function()
+  local uri = vim.uri_from_bufnr(0)
+  vim.lsp.buf.execute_command({ command = 'helm.renderFullPreview', arguments = { uri } })
+end, { desc = 'Helm Render Full Chart Preview' })
+```
 
 ### Experimental YAML Formatter (Beta)
 
-The original `helm-ls` explicitly disabled YAML formatting for templates because standard tools break `nindent/indent` usage. We have implemented an **experimental heuristic formatter** that intelligently adjusts YAML block indentations without breaking your `{{ }}` Go templates!
+The original `helm-ls` explicitly disabled YAML formatting for templates because standard tools break `nindent/indent` usage. We have implemented an **experimental heuristic formatter** that intelligently adjusts YAML block indentations without breaking your `{{ }}` Go templates.
 
-Because it is an experimental feature, it is **disabled by default**. 
-
-**To enable it**, add the following to your Neovim LSP configuration:
+Disabled by default. **To enable it**:
 ```lua
 require('lspconfig').helm_ls.setup {
   settings = {
     ['helm-ls'] = {
       yamlFormatter = {
-        enabled = true -- Enable experimental heuristic template formatting
+        enabled = true
       }
     }
   }
 }
 ```
-If you encounter any issues (e.g. the formatter aggressively mangling your custom template spacing), you can easily disable it by removing or setting `yamlFormatter.enabled` to `false`.
 
 ### Inherited from helm-ls
 
@@ -87,14 +123,8 @@ Schemas are automatically fetched from [yannh/kubernetes-json-schema](https://gi
 
 ### Custom Resource Definitions (CRDs)
 
-Helm Upgraded LSP supports hover and validation for CRDs through two mechanisms:
-
-1. **Auto-parsing from chart**: Place your CRD YAML files in the `crds/` directory of your Helm chart. The LSP will automatically discover them, extract the `openAPIV3Schema`, and generate a local JSON schema.
-2. **Global Custom Schemas**: Place custom JSON schema files (e.g., `myresource-myapp.io-v1.json`) in `~/.config/helm-lsp/schemas/`. The LSP will prioritize these over downloaded schemas.
-
-### Supported Resources
-
-All standard Kubernetes resources are supported. When `apiVersion` is a template expression (e.g. `{{ include "helpers.capabilities.deployment.apiVersion" $ }}`), the LSP automatically infers the correct version from the resource `kind`.
+1. **Auto-parsing from chart**: Place CRD YAML files in the `crds/` directory. The LSP will discover them and generate a local JSON schema.
+2. **Global Custom Schemas**: Place custom JSON schema files in `~/.config/helm-lsp/schemas/`. These take priority over downloaded schemas.
 
 ## Configuration
 

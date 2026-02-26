@@ -60,3 +60,7 @@ func (h *YamlHandler) getYamlPath(uri lsp.URI, pos lsp.Position) (path string, e
 func (h *YamlHandler) Formatting(ctx context.Context, params *lsp.DocumentFormattingParams) (result []lsp.TextEdit, err error) {
 	return nil, nil
 }
+
+func (h *YamlHandler) CodeAction(ctx context.Context, params *lsp.CodeActionParams) (result []lsp.CodeAction, err error) {
+	return nil, nil
+}

@@ -59,6 +59,38 @@ func VirtualRenderDiagnostics(ch *charts.Chart, doc *document.TemplateDocument, 
 	return diagnostics
 }
 
+func VirtualRenderString(ch *charts.Chart, doc *document.TemplateDocument, vals chartutil.Values) (string, error) {
+	if ch.HelmChart == nil {
+		return "", fmt.Errorf("chart not loaded")
+	}
+
+	chObj := *ch.HelmChart
+	templatesCopy := make([]*chart.File, len(ch.HelmChart.Templates))
+	for i, t := range ch.HelmChart.Templates {
+		tCopy := *t
+		if strings.HasSuffix(doc.URI.Filename(), t.Name) {
+			tCopy.Data = doc.Content
+		}
+		templatesCopy[i] = &tCopy
+	}
+	chObj.Templates = templatesCopy
+
+	renderEngine := action.NewInstall(&action.Configuration{})
+	renderEngine.ClientOnly = true
+	renderEngine.DryRun = true
+	renderEngine.ReleaseName = "lsp-preview"
+	renderEngine.Namespace = "default"
+
+	rel, err := renderEngine.Run(&chObj, vals)
+	if err != nil {
+		return "", fmt.Errorf("Render error: %v", err)
+	}
+
+	// Filter the manifest string down to exactly the file we asked for (optional, but helpful if they just want the current file)
+	// Actually, `helm.renderFullPreview` returns everything. Let's return everything for now and let the caller split if needed.
+	return rel.Manifest, nil
+}
+
 func parseHelmError(errMsg string, uri string, content string) []lsp.Diagnostic {
 	targetPath := uri
 	fileName := ""

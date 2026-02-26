@@ -9,8 +9,12 @@ import (
 )
 
 func (h *TemplateHandler) Formatting(ctx context.Context, params *lsp.DocumentFormattingParams) (result []lsp.TextEdit, err error) {
+	logger.Printf("TemplateHandler.Formatting called for URI: %s", params.TextDocument.URI)
+	logger.Printf("Beta YAML Formatter state: enabled=%v", h.formatterConfig.Enabled)
+
 	doc, ok := h.documents.GetTemplateDoc(params.TextDocument.URI)
 	if !ok {
+		logger.Println("Formatting failed: could not get template doc")
 		return nil, nil
 	}
 
@@ -20,8 +24,11 @@ func (h *TemplateHandler) Formatting(ctx context.Context, params *lsp.DocumentFo
 	formattedContent = languagefeatures.EnsureNewlineAtEnd(formattedContent)
 
 	if content == formattedContent {
+		logger.Println("Formatting skipped: content is already perfectly formatted")
 		return nil, nil
 	}
+
+	logger.Println("Formatting applied: generating TextEdit payload")
 
 	lines := strings.Split(content, "\n")
 	lastLine := uint32(len(lines) - 1)

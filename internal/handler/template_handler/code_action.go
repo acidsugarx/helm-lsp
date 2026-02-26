@@ -6,6 +6,10 @@ import (
 	"regexp"
 	"strings"
 
+	languagefeatures "github.com/acidsugarx/helm-lsp/internal/language_features"
+	templateast "github.com/acidsugarx/helm-lsp/internal/lsp/template_ast"
+	"github.com/acidsugarx/helm-lsp/internal/tree-sitter/gotemplate"
+	sitter "github.com/smacker/go-tree-sitter"
 	lsp "go.lsp.dev/protocol"
 )
 
@@ -18,28 +22,29 @@ var CodeActionKinds = []lsp.CodeActionKind{
 
 var (
 	yamlKVRegex      = regexp.MustCompile(`^(\s*(?:-\s+)?)([\w\-\.\/]+):\s+(.+)$`)
-	quoteRegex       = regexp.MustCompile(`(\{\{-?\s*(?:\$\.|\.)[^\}]+?)(\s*-?\}\})`)
-	indentPipeRegex  = regexp.MustCompile(`(\{\{-?\s*(?:include|template)\s+"[^"]+"\s+[^\}]+)\|\s*indent\s+(\d+)\s*(-?\}\})`)
-	rangeBlockRegex  = regexp.MustCompile(`\{\{-?\s*range\b`)
-	rangeVarsRegex   = regexp.MustCompile(`range\s+(\$\w+)\s*,\s*(\$\w+)\s*:=`)
-	rangeSimpleRegex = regexp.MustCompile(`range\s+(\$\w+)\s*:=`)
-	withBlockRegex   = regexp.MustCompile(`\{\{-?\s*with\b`)
-	endBlockRegex    = regexp.MustCompile(`\{\{-?\s*end\s*-?\}\}`)
-	defineBlockRegex = regexp.MustCompile(`\{\{-?\s*define\b`)
 	yamlKeyOnlyRegex = regexp.MustCompile(`^(\s*)([\w\-\.\/]+):\s*$`)
 )
 
 func (h *TemplateHandler) CodeAction(ctx context.Context, params *lsp.CodeActionParams) (result []lsp.CodeAction, err error) {
+	posParams := lsp.TextDocumentPositionParams{
+		TextDocument: params.TextDocument,
+		Position:     params.Range.Start,
+	}
+	genericDocumentUseCase, err := h.NewGenericDocumentUseCase(posParams, templateast.NodeAtPosition)
+	if err != nil {
+		return nil, nil // Gracefully fallback if no node found
+	}
+
 	doc, ok := h.documents.GetTemplateDoc(params.TextDocument.URI)
 	if !ok {
 		return nil, nil
 	}
 
 	content := string(doc.Content)
-	return getCodeActions(content, params.Range, string(params.TextDocument.URI)), nil
+	return getCodeActions(content, params.Range, string(params.TextDocument.URI), genericDocumentUseCase), nil
 }
 
-func getCodeActions(content string, rng lsp.Range, uri string) []lsp.CodeAction {
+func getCodeActions(content string, rng lsp.Range, uri string, usecase *languagefeatures.GenericDocumentUseCase) []lsp.CodeAction {
 	var actions []lsp.CodeAction
 	lines := strings.Split(content, "\n")
 	lineIdx := int(rng.Start.Line)
@@ -51,12 +56,12 @@ func getCodeActions(content string, rng lsp.Range, uri string) []lsp.CodeAction 
 	line := lines[lineIdx]
 	trimmed := strings.TrimSpace(line)
 
-	scope := detectScope(lines, lineIdx)
+	scope := detectScopeAST(usecase)
 
-	actions = append(actions, extractToValuesActions(lines, line, trimmed, lineIdx, uri, scope)...)
-	actions = append(actions, quoteWrapActions(line, lineIdx, uri)...)
-	actions = append(actions, nindentActions(line, lineIdx, uri)...)
-	actions = append(actions, toYamlNindentActions(line, lineIdx, uri)...)
+	actions = append(actions, extractToValuesActions(lines, line, trimmed, lineIdx, uri, scope, usecase)...)
+	actions = append(actions, quoteWrapActions(line, lineIdx, uri, usecase)...)
+	actions = append(actions, nindentActions(line, lineIdx, uri, usecase)...)
+	actions = append(actions, toYamlNindentActions(line, lineIdx, uri, usecase)...)
 
 	return actions
 }
@@ -72,56 +77,59 @@ type TemplateScope struct {
 	WithVar     string
 }
 
-func detectScope(lines []string, lineIdx int) TemplateScope {
+func detectScopeAST(usecase *languagefeatures.GenericDocumentUseCase) TemplateScope {
 	scope := TemplateScope{RootRef: "."}
-	depth := 0
-
-	for i := lineIdx - 1; i >= 0; i-- {
-		trimmed := strings.TrimSpace(lines[i])
-
-		if trimmed == "" || strings.HasPrefix(trimmed, "#") || trimmed == "---" {
-			continue
-		}
-
-		endCount := len(endBlockRegex.FindAllString(trimmed, -1))
-		depth += endCount
-
-		if rangeBlockRegex.MatchString(trimmed) {
-			if depth > 0 {
-				depth--
-			} else {
-				scope.InRange = true
-				scope.Depth++
-				scope.RootRef = "$"
-				if m := rangeVarsRegex.FindStringSubmatch(trimmed); m != nil {
-					scope.RangeKeyVar = m[1]
-					scope.RangeValVar = m[2]
-				} else if m := rangeSimpleRegex.FindStringSubmatch(trimmed); m != nil {
-					scope.RangeValVar = m[1]
-				}
-			}
-			continue
-		}
-		if withBlockRegex.MatchString(trimmed) {
-			if depth > 0 {
-				depth--
-			} else {
-				scope.InWith = true
-				scope.Depth++
-				scope.RootRef = "$"
-			}
-			continue
-		}
-		if defineBlockRegex.MatchString(trimmed) {
-			if depth > 0 {
-				depth--
-			} else {
-				scope.InDefine = true
-				scope.RootRef = "$"
-			}
-			continue
-		}
+	if usecase == nil || usecase.Node == nil {
+		return scope
 	}
+
+	var actionNode *sitter.Node
+	curr := usecase.Node
+	for curr != nil {
+		if curr.Type() == gotemplate.NodeTypeRangeAction ||
+			curr.Type() == gotemplate.NodeTypeWithAction ||
+			curr.Type() == gotemplate.NodeTypeDefineAction {
+			actionNode = curr
+			break
+		}
+		curr = curr.Parent()
+	}
+
+	if actionNode == nil {
+		return scope
+	}
+
+	if actionNode.Type() == gotemplate.NodeTypeRangeAction {
+		scope.InRange = true
+		scope.RootRef = "$"
+
+		for i := 0; i < int(actionNode.ChildCount()); i++ {
+			child := actionNode.Child(i)
+			if child.Type() == gotemplate.NodeTypeRangeVariableDefinition {
+				var vars []string
+				for j := 0; j < int(child.ChildCount()); j++ {
+					vChild := child.Child(j)
+					if vChild.Type() == gotemplate.NodeTypeVariable {
+						vars = append(vars, vChild.Content([]byte(usecase.Document.Content)))
+					}
+				}
+				if len(vars) >= 2 {
+					scope.RangeKeyVar = vars[0]
+					scope.RangeValVar = vars[1]
+				} else if len(vars) == 1 {
+					scope.RangeValVar = vars[0]
+				}
+				break
+			}
+		}
+	} else if actionNode.Type() == gotemplate.NodeTypeWithAction {
+		scope.InWith = true
+		scope.RootRef = "$"
+	} else if actionNode.Type() == gotemplate.NodeTypeDefineAction {
+		scope.InDefine = true
+		scope.RootRef = "$"
+	}
+
 	return scope
 }
 
@@ -321,7 +329,7 @@ func makeEdit(uri string, lineIdx int, oldLineLen int, newText string) *lsp.Work
 	}
 }
 
-func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, uri string, scope TemplateScope) []lsp.CodeAction {
+func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, uri string, scope TemplateScope, usecase *languagefeatures.GenericDocumentUseCase) []lsp.CodeAction {
 	var actions []lsp.CodeAction
 	if strings.Contains(trimmed, "{{") || strings.Contains(trimmed, "}}") {
 		return nil
@@ -401,62 +409,146 @@ func extractToValuesActions(lines []string, line, trimmed string, lineIdx int, u
 	return actions
 }
 
-func quoteWrapActions(line string, lineIdx int, uri string) []lsp.CodeAction {
+func findAncestor(node *sitter.Node, nodeType string) *sitter.Node {
+	for node != nil {
+		if node.Type() == nodeType {
+			return node
+		}
+		node = node.Parent()
+	}
+	return nil
+}
+
+func quoteWrapActions(line string, lineIdx int, uri string, usecase *languagefeatures.GenericDocumentUseCase) []lsp.CodeAction {
 	var actions []lsp.CodeAction
-	matches := quoteRegex.FindStringSubmatchIndex(line)
+	if usecase == nil || usecase.Node == nil {
+		return actions
+	}
+
+	templateNode := findAncestor(usecase.Node, gotemplate.NodeTypeTemplate)
+	if templateNode == nil {
+		return actions
+	}
+
+	content := templateNode.Content([]byte(usecase.Document.Content))
+	if strings.Contains(content, "| quote") || strings.Contains(content, "| squote") || strings.Contains(content, "| toYaml") {
+		return actions
+	}
+
+	matches := regexp.MustCompile(`(\s*-?\}\})$`).FindStringSubmatchIndex(content)
 	if matches == nil {
-		return nil
+		return actions
 	}
-	expr := line[matches[2]:matches[3]]
-	if strings.Contains(expr, "| quote") || strings.Contains(expr, "| squote") || strings.Contains(expr, "| toYaml") {
-		return nil
-	}
+
+	insertPos := matches[2]
+	newText := content[:insertPos] + " | quote" + content[insertPos:]
+	rng := templateast.GetLspRangeForNode(templateNode)
+
 	kind := lsp.QuickFix
-	insertPos := matches[4]
-	newText := line[:insertPos] + " | quote" + line[insertPos:]
 	actions = append(actions, lsp.CodeAction{
 		Title: "Add | quote to template expression",
 		Kind:  kind,
-		Edit:  makeEdit(uri, lineIdx, len(line), newText),
+		Edit: &lsp.WorkspaceEdit{
+			Changes: map[lsp.DocumentURI][]lsp.TextEdit{
+				lsp.DocumentURI(uri): {
+					{
+						Range:   rng,
+						NewText: newText,
+					},
+				},
+			},
+		},
 	})
 	return actions
 }
 
-func nindentActions(line string, lineIdx int, uri string) []lsp.CodeAction {
+func nindentActions(line string, lineIdx int, uri string, usecase *languagefeatures.GenericDocumentUseCase) []lsp.CodeAction {
 	var actions []lsp.CodeAction
-	matches := indentPipeRegex.FindStringSubmatchIndex(line)
-	if matches == nil {
-		return nil
+	if usecase == nil || usecase.Node == nil {
+		return actions
 	}
-	newLine := line[:matches[0]] + line[matches[2]:matches[3]] + "| nindent " + line[matches[4]:matches[5]] + " " + line[matches[6]:matches[7]] + line[matches[7]:]
+
+	funcCall := findAncestor(usecase.Node, gotemplate.NodeTypeFunctionCall)
+	if funcCall == nil {
+		return actions
+	}
+
+	content := funcCall.Content([]byte(usecase.Document.Content))
+	if !strings.HasPrefix(strings.TrimSpace(content), "indent ") {
+		return actions
+	}
+
+	newText := strings.Replace(content, "indent", "nindent", 1)
+	rng := templateast.GetLspRangeForNode(funcCall)
+
 	kind := lsp.QuickFix
 	actions = append(actions, lsp.CodeAction{
 		Title: "Use nindent instead of indent",
 		Kind:  kind,
-		Edit:  makeEdit(uri, lineIdx, len(line), newLine),
+		Edit: &lsp.WorkspaceEdit{
+			Changes: map[lsp.DocumentURI][]lsp.TextEdit{
+				lsp.DocumentURI(uri): {
+					{
+						Range:   rng,
+						NewText: newText,
+					},
+				},
+			},
+		},
 	})
 	return actions
 }
 
-func toYamlNindentActions(line string, lineIdx int, uri string) []lsp.CodeAction {
+func toYamlNindentActions(line string, lineIdx int, uri string, usecase *languagefeatures.GenericDocumentUseCase) []lsp.CodeAction {
 	var actions []lsp.CodeAction
-	toYamlNoIndent := regexp.MustCompile(`(\{\{-?\s*toYaml\s+[^\}|]+?)(\s*-?\}\})`)
-	matches := toYamlNoIndent.FindStringSubmatchIndex(line)
+	if usecase == nil || usecase.Node == nil {
+		return actions
+	}
+
+	funcCall := findAncestor(usecase.Node, gotemplate.NodeTypeFunctionCall)
+	if funcCall == nil {
+		return actions
+	}
+
+	content := funcCall.Content([]byte(usecase.Document.Content))
+	if !strings.HasPrefix(strings.TrimSpace(content), "toYaml ") {
+		return actions
+	}
+
+	templateNode := findAncestor(usecase.Node, gotemplate.NodeTypeTemplate)
+	if templateNode == nil {
+		return actions
+	}
+
+	templateContent := templateNode.Content([]byte(usecase.Document.Content))
+	if strings.Contains(templateContent, "| nindent") || strings.Contains(templateContent, "| indent") {
+		return actions
+	}
+
+	matches := regexp.MustCompile(`(\s*-?\}\})$`).FindStringSubmatchIndex(templateContent)
 	if matches == nil {
-		return nil
+		return actions
 	}
-	expr := line[matches[2]:matches[3]]
-	if strings.Contains(expr, "| nindent") || strings.Contains(expr, "| indent") {
-		return nil
-	}
+
 	indentLevel := countIndent(line)
+	insertPos := matches[2]
+	newText := templateContent[:insertPos] + fmt.Sprintf(" | nindent %d", indentLevel) + templateContent[insertPos:]
+	rng := templateast.GetLspRangeForNode(templateNode)
+
 	kind := lsp.QuickFix
-	insertPos := matches[4]
-	newText := line[:insertPos] + fmt.Sprintf(" | nindent %d", indentLevel) + line[insertPos:]
 	actions = append(actions, lsp.CodeAction{
 		Title: fmt.Sprintf("Add | nindent %d to toYaml", indentLevel),
 		Kind:  kind,
-		Edit:  makeEdit(uri, lineIdx, len(line), newText),
+		Edit: &lsp.WorkspaceEdit{
+			Changes: map[lsp.DocumentURI][]lsp.TextEdit{
+				lsp.DocumentURI(uri): {
+					{
+						Range:   rng,
+						NewText: newText,
+					},
+				},
+			},
+		},
 	})
 	return actions
 }

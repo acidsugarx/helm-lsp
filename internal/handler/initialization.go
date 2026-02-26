@@ -48,6 +48,7 @@ func (h *ServerHandler) Initialize(ctx context.Context, params *lsp.InitializePa
 			ReferencesProvider:         true,
 			DocumentSymbolProvider:     true,
 			DocumentFormattingProvider: true,
+			CodeActionProvider:         true,
 		},
 	}, nil
 }
