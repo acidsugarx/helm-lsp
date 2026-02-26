@@ -9,19 +9,25 @@ import (
 var templateBlockRegex = regexp.MustCompile(`\{\{-?\s*.*?\s*-?\}\}`)
 
 // FormatHelmYAML formats a Helm template file's YAML structure while preserving
-// Go template blocks ({{ ... }}). The strategy:
-// 1. Replace all {{ ... }} blocks with unique placeholders
-// 2. Fix YAML indentation
-// 3. Restore the original template blocks
-func FormatHelmYAML(content string) string {
-	lines := strings.Split(content, "\n")
+// Go template blocks ({{ ... }}).
+func FormatHelmYAML(content string, enabled bool) string {
+	if !enabled {
+		return content
+	}
 
-	// Phase 1: collect all template blocks and create placeholders
+	lines := strings.Split(content, "\n")
 	placeholders := make(map[string]string)
 	counter := 0
 	processedLines := make([]string, len(lines))
 
 	for i, line := range lines {
+		// Do not process placeholders for lines with nindent/indent
+		// we want to freeze these completely
+		if strings.Contains(line, "nindent") || strings.Contains(line, "indent") {
+			processedLines[i] = line
+			continue
+		}
+
 		processed := templateBlockRegex.ReplaceAllStringFunc(line, func(match string) string {
 			key := fmt.Sprintf("__HELM_TPL_%d__", counter)
 			placeholders[key] = match
@@ -31,11 +37,8 @@ func FormatHelmYAML(content string) string {
 		processedLines[i] = processed
 	}
 
-	// Phase 2: fix indentation
-	// We track indentation based on YAML structure
 	formattedLines := formatYAMLIndentation(processedLines)
 
-	// Phase 3: restore placeholders
 	result := make([]string, len(formattedLines))
 	for i, line := range formattedLines {
 		for key, original := range placeholders {
@@ -47,15 +50,11 @@ func FormatHelmYAML(content string) string {
 	return strings.Join(result, "\n")
 }
 
-// formatYAMLIndentation fixes YAML indentation levels.
-// It handles:
-// - Top-level keys (no indent)
-// - Nested maps (2-space indent per level)
-// - List items (- prefix)
-// - Template-only lines (preserve as-is)
-// - Document separators (---)
+// formatYAMLIndentation fixes YAML indentation levels using a simple heuristic.
 func formatYAMLIndentation(lines []string) []string {
 	result := make([]string, 0, len(lines))
+
+	// A stack to track indentation of block levels
 	indentStack := []int{0}
 
 	for _, line := range lines {
@@ -64,28 +63,62 @@ func formatYAMLIndentation(lines []string) []string {
 		// Preserve empty lines and document separators
 		if trimmed == "" || trimmed == "---" {
 			result = append(result, line)
+			indentStack = []int{0}
 			continue
 		}
 
-		// Preserve comment lines (keep their current indentation)
+		// Preserve comment lines by matching current stack depth if possible
+		// or just leaving them alone. We leave them alone for safety.
 		if strings.HasPrefix(trimmed, "#") {
 			result = append(result, line)
 			continue
 		}
 
-		// Preserve lines that are purely template blocks (no YAML content)
 		if isTemplateOnlyLine(trimmed) {
+			// Align pure template lines (like if/end) to current indent level
+			// But do not push or pop stack
+			currentIndent := indentStack[len(indentStack)-1]
+			result = append(result, strings.Repeat(" ", currentIndent)+trimmed)
+			continue
+		}
+
+		if strings.Contains(line, "nindent") || strings.Contains(line, "indent") {
 			result = append(result, line)
 			continue
 		}
 
-		// For regular YAML lines — preserve the existing indentation
-		// We don't want to aggressively reindent because Helm templates
-		// use nindent/indent helpers that would conflict
-		result = append(result, line)
+		// Calculate existing physical indent
+		physicalIndent := len(line) - len(strings.TrimLeft(line, " \t"))
+
+		// If this line is un-indented relative to top of stack, pop until it matches
+		// (this relies on the user partially formatting their code, which is realistic)
+		for len(indentStack) > 1 {
+			parentIndent := indentStack[len(indentStack)-2]
+			if physicalIndent <= parentIndent {
+				indentStack = indentStack[:len(indentStack)-1]
+			} else {
+				break
+			}
+		}
+
+		currentIndent := indentStack[len(indentStack)-1]
+
+		// Format the line with the current indent
+		if strings.HasPrefix(trimmed, "-") {
+			result = append(result, strings.Repeat(" ", currentIndent)+trimmed)
+			// A list item usually means child objects are indented by 2 spaces relative to the dash
+			if strings.HasSuffix(trimmed, ":") {
+				indentStack = append(indentStack, currentIndent+2)
+			}
+		} else {
+			result = append(result, strings.Repeat(" ", currentIndent)+trimmed)
+			if strings.HasSuffix(trimmed, ":") {
+				// Next block should be indented further
+				indentStack = append(indentStack, currentIndent+2)
+			}
+		}
 	}
 
-	_ = indentStack // suppress unused warning
 	return result
 }
 

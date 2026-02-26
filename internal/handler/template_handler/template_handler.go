@@ -17,6 +17,7 @@ type TemplateHandler struct {
 	chartStore      *charts.ChartStore
 	yamllsConnector *yamlls.Connector
 	helmlintConfig  util.HelmLintConfig
+	formatterConfig util.YamlFormatterConfig
 }
 
 func NewTemplateHandler(client protocol.Client, documents *document.DocumentStore, chartStore *charts.ChartStore, helmlintConfig util.HelmLintConfig) *TemplateHandler {

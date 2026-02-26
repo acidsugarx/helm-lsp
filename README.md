@@ -12,8 +12,28 @@ An enhanced Helm Language Server Protocol (LSP) built on top of the official [`h
 | **K8s JSON Schema Validation** | Validates rendered templates against K8s schemas (fetched & cached from GitHub) |
 | **Variable Hover** | Hover over `$host` in `range` loops → shows map keys; hover over `$ing` → shows nested values |
 | **Keyword Hover** | Hover over `if` / `range` / `with` / `end` / `not` / `and` / `or` → syntax reference |
-| **Template-aware YAML Formatting** | Formats YAML while preserving `{{ }}` template blocks |
+| **Template-aware YAML Formatting** | Formats YAML while preserving `{{ }}` template blocks (**BETA** - see below) |
 | **Template apiVersion Resolution** | Automatically resolves `{{ include "helpers.capabilities..." }}` to the correct apiVersion using kind inference |
+
+### Experimental YAML Formatter (Beta)
+
+The original `helm-ls` explicitly disabled YAML formatting for templates because standard tools break `nindent/indent` usage. We have implemented an **experimental heuristic formatter** that intelligently adjusts YAML block indentations without breaking your `{{ }}` Go templates!
+
+Because it is an experimental feature, it is **disabled by default**. 
+
+**To enable it**, add the following to your Neovim LSP configuration:
+```lua
+require('lspconfig').helm_ls.setup {
+  settings = {
+    ['helm-ls'] = {
+      yamlFormatter = {
+        enabled = true -- Enable experimental heuristic template formatting
+      }
+    }
+  }
+}
+```
+If you encounter any issues (e.g. the formatter aggressively mangling your custom template spacing), you can easily disable it by removing or setting `yamlFormatter.enabled` to `false`.
 
 ### Inherited from helm-ls
 

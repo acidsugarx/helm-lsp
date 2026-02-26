@@ -14,6 +14,11 @@ type HelmlsConfiguration struct {
 	ValuesFilesConfig   ValuesFilesConfig   `json:"valuesFiles,omitempty"`
 	HelmLintConfig      HelmLintConfig      `json:"helmLint,omitempty"`
 	LogLevel            string              `json:"logLevel,omitempty"`
+	YamlFormatterConfig YamlFormatterConfig `json:"yamlFormatter,omitempty"`
+}
+
+type YamlFormatterConfig struct {
+	Enabled bool `json:"enabled,omitempty"`
 }
 
 type ValuesFilesConfig struct {
@@ -144,6 +149,9 @@ var DefaultConfig = HelmlsConfiguration{
 		DiagnosticsLimit:          50,
 		ShowDiagnosticsDirectly:   false,
 		YamllsSettings:            DefaultYamllsSettings,
+	},
+	YamlFormatterConfig: YamlFormatterConfig{
+		Enabled: false, // Beta feature, disabled by default
 	},
 }
 

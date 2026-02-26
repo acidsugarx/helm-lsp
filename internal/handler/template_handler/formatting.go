@@ -15,7 +15,7 @@ func (h *TemplateHandler) Formatting(ctx context.Context, params *lsp.DocumentFo
 	}
 
 	content := string(doc.Content)
-	formattedContent := languagefeatures.FormatHelmYAML(content)
+	formattedContent := languagefeatures.FormatHelmYAML(content, h.formatterConfig.Enabled)
 	formattedContent = languagefeatures.TrimTrailingWhitespace(formattedContent)
 	formattedContent = languagefeatures.EnsureNewlineAtEnd(formattedContent)
 
