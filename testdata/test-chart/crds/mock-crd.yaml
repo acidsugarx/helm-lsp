@@ -14,7 +14,21 @@ spec:
           properties:
             spec:
               type: object
+              description: "The specific configuration for the CronTab"
               properties:
                 cronSpec:
                   type: string
-                  description: "The cron schedule, e.g. * * * * *"
+                  description: "РАБОТАЕТ: The cron schedule, e.g. * * * * *"
+                image:
+                  type: string
+                  description: "РАБОТАЕТ: The container image to run"
+                replicas:
+                  type: integer
+                  description: "Number of replicas"
+            status:
+              type: object
+              description: "The current status of the CronTab"
+              properties:
+                running:
+                  type: boolean
+                  description: "Whether the job is currently running"
