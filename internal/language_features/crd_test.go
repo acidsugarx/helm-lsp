@@ -1,14 +1,17 @@
 package languagefeatures
 
 import (
+	"path/filepath"
 	"testing"
 )
 
 func TestLoadCRDsFromChart(t *testing.T) {
 	sm := NewSchemaManager()
 
-	// Load the CRDs from the mes-chat-sfrum charter
-	chartRoot := "/Users/acidsugarx/CODES/w/mo/mes-chat-sfrum/charts/helm-chart"
+	// Path to the testdata directory relative to internal/language_features
+	chartRoot := filepath.Join("..", "..", "testdata", "test-chart")
+
+	// Test the loading functionality
 	sm.LoadCRDsFromChart(chartRoot)
 
 	desc, err := sm.GetFieldDescription("stable.example.com/v1", "CronTab", []string{"spec", "cronSpec"})
