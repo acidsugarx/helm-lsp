@@ -65,6 +65,13 @@ lspconfig.helm_upgraded.setup({})
 
 Schemas are automatically fetched from [yannh/kubernetes-json-schema](https://github.com/yannh/kubernetes-json-schema) and cached locally in `/tmp/helm-lsp-schemas/`.
 
+### Custom Resource Definitions (CRDs)
+
+Helm Upgraded LSP supports hover and validation for CRDs through two mechanisms:
+
+1. **Auto-parsing from chart**: Place your CRD YAML files in the `crds/` directory of your Helm chart. The LSP will automatically discover them, extract the `openAPIV3Schema`, and generate a local JSON schema.
+2. **Global Custom Schemas**: Place custom JSON schema files (e.g., `myresource-myapp.io-v1.json`) in `~/.config/helm-lsp/schemas/`. The LSP will prioritize these over downloaded schemas.
+
 ### Supported Resources
 
 All standard Kubernetes resources are supported. When `apiVersion` is a template expression (e.g. `{{ include "helpers.capabilities.deployment.apiVersion" $ }}`), the LSP automatically infers the correct version from the resource `kind`.

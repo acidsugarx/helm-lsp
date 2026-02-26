@@ -2,9 +2,11 @@ package handler
 
 import (
 	"context"
+	"fmt"
 	"os"
 
 	"github.com/acidsugarx/helm-lsp/internal/charts"
+	languagefeatures "github.com/acidsugarx/helm-lsp/internal/language_features"
 	"github.com/acidsugarx/helm-lsp/internal/util"
 	"github.com/sirupsen/logrus"
 	lsp "go.lsp.dev/protocol"
@@ -77,6 +79,9 @@ func configureLogLevel(helmlsConfig util.HelmlsConfiguration) {
 }
 
 func (h *ServerHandler) AddChartCallback(chart *charts.Chart) {
+	logger.Println(fmt.Sprintf("Loading CRDs for chart: %s", chart.RootURI.Filename()))
+	languagefeatures.GlobalSchemaManager.LoadCRDsFromChart(chart.RootURI.Filename())
+
 	h.NewChartWithWatchedFiles(chart)
 	go h.LoadDocsOnNewChart(chart)
 }

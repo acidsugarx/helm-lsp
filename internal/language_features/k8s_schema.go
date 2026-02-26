@@ -20,10 +20,11 @@ var GlobalSchemaManager = NewSchemaManager()
 
 // SchemaManager handles caching and validating against Kubernetes JSON schemas.
 type SchemaManager struct {
-	cacheDir string
-	compiler *jsonschema.Compiler
-	schemas  map[string]*jsonschema.Schema
-	mu       sync.Mutex
+	cacheDir         string
+	customSchemasDir string
+	compiler         *jsonschema.Compiler
+	schemas          map[string]*jsonschema.Schema
+	mu               sync.Mutex
 }
 
 // NewSchemaManager initializes a schema manager with a temporary cache directory.
@@ -31,13 +32,21 @@ func NewSchemaManager() *SchemaManager {
 	cacheDir := filepath.Join(os.TempDir(), "helm-lsp-schemas")
 	_ = os.MkdirAll(cacheDir, 0755)
 
+	homeDir, _ := os.UserHomeDir()
+	customSchemasDir := ""
+	if homeDir != "" {
+		customSchemasDir = filepath.Join(homeDir, ".config", "helm-lsp", "schemas")
+		_ = os.MkdirAll(customSchemasDir, 0755)
+	}
+
 	c := jsonschema.NewCompiler()
 	c.Draft = jsonschema.Draft7
 
 	return &SchemaManager{
-		cacheDir: cacheDir,
-		compiler: c,
-		schemas:  make(map[string]*jsonschema.Schema),
+		cacheDir:         cacheDir,
+		customSchemasDir: customSchemasDir,
+		compiler:         c,
+		schemas:          make(map[string]*jsonschema.Schema),
 	}
 }
 
@@ -179,18 +188,26 @@ func (sm *SchemaManager) GetFieldDescription(apiVersion, kind string, path []str
 		schemaID = strings.ToLower(fmt.Sprintf("%s-%s.json", kind, apiVersion))
 	}
 
-	// Ensure the schema file is cached
+	// Ensure the schema file is cached (or exists in custom dir)
 	cachePath := filepath.Join(sm.cacheDir, schemaID)
-	if _, err := os.Stat(cachePath); err != nil {
+	customPath := filepath.Join(sm.customSchemasDir, schemaID)
+
+	activePath := ""
+	if sm.customSchemasDir != "" && fileExists(customPath) {
+		activePath = customPath
+	} else if fileExists(cachePath) {
+		activePath = cachePath
+	} else {
 		// Trigger download via getSchema (which also caches the file)
 		_, schemaErr := sm.getSchema(apiVersion, kind)
 		if schemaErr != nil {
 			return "", schemaErr
 		}
+		activePath = cachePath
 	}
 
-	// Read the raw JSON from cache
-	data, err := os.ReadFile(cachePath)
+	// Read the raw JSON from activePath
+	data, err := os.ReadFile(activePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read schema cache: %w", err)
 	}
@@ -235,9 +252,21 @@ func (sm *SchemaManager) getSchema(apiVersion, kind string) (*jsonschema.Schema,
 		return schema, nil
 	}
 
+	// Try loading from custom schemas dir first
+	if sm.customSchemasDir != "" {
+		customPath := filepath.Join(sm.customSchemasDir, schemaID)
+		if fileExists(customPath) {
+			sch, err := sm.compiler.Compile("file://" + customPath)
+			if err == nil {
+				sm.schemas[schemaID] = sch
+				return sch, nil
+			}
+		}
+	}
+
 	// Try loading from cache
 	cachePath := filepath.Join(sm.cacheDir, schemaID)
-	if _, err := os.Stat(cachePath); err == nil {
+	if fileExists(cachePath) {
 		sch, err := sm.compiler.Compile("file://" + cachePath)
 		if err == nil {
 			sm.schemas[schemaID] = sch
@@ -363,4 +392,117 @@ func normalizeYAMLMap(in interface{}) interface{} {
 		}
 	}
 	return in
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// LoadCRDsFromChart scans the crds/ directory in the chart root, parses any found
+// CustomResourceDefinitions, extracts their OpenAPI v3 schema, and saves them
+// as standalone JSON schema files in the cache directory.
+func (sm *SchemaManager) LoadCRDsFromChart(chartRoot string) {
+	crdsDir := filepath.Join(chartRoot, "crds")
+	if !fileExists(crdsDir) {
+		return
+	}
+
+	files, err := os.ReadDir(crdsDir)
+	if err != nil {
+		log.Printf("Failed to read crds dir: %v", err)
+		return
+	}
+
+	for _, file := range files {
+		if file.IsDir() || (!strings.HasSuffix(file.Name(), ".yaml") && !strings.HasSuffix(file.Name(), ".yml")) {
+			continue
+		}
+
+		path := filepath.Join(crdsDir, file.Name())
+		content, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+
+		sm.parseAndCacheCRD(content)
+	}
+}
+
+func (sm *SchemaManager) parseAndCacheCRD(content []byte) {
+	// Parse multi-doc YAML
+	decoder := yaml.NewDecoder(strings.NewReader(string(content)))
+	for {
+		var doc map[string]interface{}
+		err := decoder.Decode(&doc)
+		if err == io.EOF {
+			break
+		}
+		if err != nil || doc == nil {
+			continue
+		}
+
+		kind, _ := doc["kind"].(string)
+		if kind != "CustomResourceDefinition" {
+			continue
+		}
+
+		spec, ok := doc["spec"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		group, _ := spec["group"].(string)
+		names, ok := spec["names"].(map[string]interface{})
+		if !ok {
+			continue
+		}
+
+		crdKind, _ := names["kind"].(string)
+		if group == "" || crdKind == "" {
+			continue
+		}
+
+		versions, ok := spec["versions"].([]interface{})
+		if !ok {
+			continue
+		}
+
+		for _, v := range versions {
+			versionCfg, ok := v.(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			versionName, _ := versionCfg["name"].(string)
+			if versionName == "" {
+				continue
+			}
+
+			schema, ok := versionCfg["schema"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			openAPIV3, ok := schema["openAPIV3Schema"].(map[string]interface{})
+			if !ok {
+				continue
+			}
+
+			// Clean up openAPIV3Schema into acceptable JSON schema
+			schemaBytes, err := json.Marshal(normalizeYAMLMap(openAPIV3))
+			if err != nil {
+				continue
+			}
+
+			// Construct API version and schema ID
+			apiVersion := fmt.Sprintf("%s/%s", group, versionName)
+			apiPrefix := strings.ReplaceAll(apiVersion, "/", "-")
+			schemaID := strings.ToLower(fmt.Sprintf("%s-%s.json", crdKind, apiPrefix))
+
+			cachePath := filepath.Join(sm.cacheDir, schemaID)
+			_ = os.WriteFile(cachePath, schemaBytes, 0644)
+			log.Printf("Cached CRD schema for %s/%s at %s", apiVersion, crdKind, cachePath)
+		}
+	}
 }
