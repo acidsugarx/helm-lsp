@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/gobwas/glob"
 	"github.com/acidsugarx/helm-lsp/internal/log"
 	"github.com/acidsugarx/helm-lsp/internal/util"
+	"github.com/gobwas/glob"
 	lsp "go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 )

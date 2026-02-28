@@ -1,0 +1,44 @@
+version: 2
+
+project_name: helm-lsp
+
+builds:
+  - id: helm-lsp
+    main: ./cmd/helm-lsp
+    binary: helm-lsp
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ignore:
+      - goos: windows
+        goarch: arm64
+    ldflags:
+      - -s -w
+      - -X github.com/acidsugarx/helm-lsp/internal/version.version={{.Version}}
+      - -X github.com/acidsugarx/helm-lsp/internal/version.gitCommit={{.Commit}}
+      - -X github.com/acidsugarx/helm-lsp/internal/version.gitTreeState=clean
+
+archives:
+  - id: release-archives
+    ids:
+      - helm-lsp
+    formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: "checksums.txt"
+
+changelog:
+  sort: asc
+  use: github-native

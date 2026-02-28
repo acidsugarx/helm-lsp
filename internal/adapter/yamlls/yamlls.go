@@ -6,10 +6,10 @@ import (
 	"os"
 	"os/exec"
 
-	"github.com/gobwas/glob"
 	"github.com/acidsugarx/helm-lsp/internal/log"
 	"github.com/acidsugarx/helm-lsp/internal/lsp/document"
 	"github.com/acidsugarx/helm-lsp/internal/util"
+	"github.com/gobwas/glob"
 	"go.lsp.dev/jsonrpc2"
 	lsp "go.lsp.dev/protocol"
 	"go.uber.org/zap"

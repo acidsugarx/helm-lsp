@@ -3,9 +3,9 @@ package util
 import (
 	"testing"
 
+	"github.com/acidsugarx/helm-lsp/internal/testutil"
 	"github.com/goccy/go-yaml"
 	"github.com/goccy/go-yaml/ast"
-	"github.com/acidsugarx/helm-lsp/internal/testutil"
 	"github.com/stretchr/testify/assert"
 )
 

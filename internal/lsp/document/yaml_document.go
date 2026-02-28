@@ -3,8 +3,8 @@ package document
 import (
 	"fmt"
 
-	"github.com/goccy/go-yaml/ast"
 	"github.com/acidsugarx/helm-lsp/internal/util"
+	"github.com/goccy/go-yaml/ast"
 	lsp "go.lsp.dev/protocol"
 	"go.lsp.dev/uri"
 	"gopkg.in/yaml.v3"

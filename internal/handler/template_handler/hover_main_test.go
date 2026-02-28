@@ -22,6 +22,7 @@ func TestHoverMain(t *testing.T) {
 		desc          string
 		position      lsp.Position
 		expected      string
+		expectedMatch string
 		expectedError error
 	}{
 		{
@@ -120,7 +121,7 @@ func TestHoverMain(t *testing.T) {
 				Line:      0,
 				Character: 0,
 			},
-			expected:      "",
+			expectedMatch: "apiVersion",
 			expectedError: nil,
 		},
 		{
@@ -201,7 +202,11 @@ func TestHoverMain(t *testing.T) {
 				},
 			})
 			assert.Equal(t, tt.expectedError, err)
-			if tt.expected == "" {
+			if tt.expectedMatch != "" {
+				if assert.NotNil(t, result) {
+					assert.Contains(t, strings.ReplaceAll(result.Contents.Value, "\r\n", "\n"), tt.expectedMatch)
+				}
+			} else if tt.expected == "" {
 				assert.Nil(t, result)
 			} else {
 				assert.Equal(t, tt.expected, strings.ReplaceAll(result.Contents.Value, "\r\n", "\n"))
