@@ -28,6 +28,14 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install yaml-language-server
+        run: npm install --global yaml-language-server@latest
+
       - name: Verify gofmt
         run: |
           unformatted="$(gofmt -l .)"
@@ -40,95 +48,48 @@ jobs:
       - name: Go vet
         run: go vet ./...
 
-      - name: Run stable test suite
-        run: go test ./pkg/engine ./internal/util
+      - name: Run full test suite
+        run: go test ./...
 
-  build:
-    name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
+  artifacts:
+    name: Build release artifacts
     needs: quality
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - runner: ubuntu-latest
-            goos: linux
-            goarch: amd64
-            ext: ""
-            archive: tar.gz
-          - runner: macos-13
-            goos: darwin
-            goarch: amd64
-            ext: ""
-            archive: tar.gz
-          - runner: windows-latest
-            goos: windows
-            goarch: amd64
-            ext: .exe
-            archive: zip
-
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-          cache: true
-
-      - name: Build binary
-        shell: bash
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
-          CGO_ENABLED: "1"
+      - name: Build artifacts with GoReleaser Cross
         run: |
-          mkdir -p dist
-          binary="helm-lsp${{ matrix.ext }}"
-          go build \
-            -ldflags "-s -w -X github.com/acidsugarx/helm-lsp/internal/version.version=${GITHUB_REF_NAME} -X github.com/acidsugarx/helm-lsp/internal/version.gitCommit=${GITHUB_SHA} -X github.com/acidsugarx/helm-lsp/internal/version.gitTreeState=clean" \
-            -o "dist/${binary}" ./cmd/helm-lsp
+          docker run --rm \
+            -e CGO_ENABLED=1 \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${GITHUB_WORKSPACE}":/go/src/github.com/acidsugarx/helm-lsp \
+            -w /go/src/github.com/acidsugarx/helm-lsp \
+            ghcr.io/goreleaser/goreleaser-cross:v1.25 \
+            release --clean --skip=validate,publish
 
-      - name: Package archive (unix)
-        if: matrix.archive == 'tar.gz'
-        shell: bash
-        run: |
-          name="helm-lsp_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          tar -C dist -czf "dist/${name}.tar.gz" "helm-lsp${{ matrix.ext }}"
-
-      - name: Package archive (windows)
-        if: matrix.archive == 'zip'
-        shell: pwsh
-        run: |
-          $name = "helm-lsp_${env:GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
-          Compress-Archive -Path "dist/helm-lsp${{ matrix.ext }}" -DestinationPath "dist/$name.zip"
-
-      - name: Upload packaged artifact
+      - name: Upload packaged artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          name: release-artifacts
           path: |
             dist/*.tar.gz
             dist/*.zip
+            dist/checksums.txt
 
   publish:
     name: Publish GitHub Release
-    needs: build
+    needs: artifacts
     runs-on: ubuntu-latest
     steps:
       - name: Download packaged artifacts
         uses: actions/download-artifact@v4
         with:
+          name: release-artifacts
           path: dist
-          merge-multiple: true
-
-      - name: Generate checksums
-        run: |
-          cd dist
-          sha256sum *.tar.gz *.zip > checksums.txt
 
       - name: Publish release
         uses: softprops/action-gh-release@v2
