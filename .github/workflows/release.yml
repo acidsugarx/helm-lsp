@@ -13,8 +13,8 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    name: Build and Publish Release Assets
+  quality:
+    name: Format, Vet, and Tests
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -43,11 +43,97 @@ jobs:
       - name: Run stable test suite
         run: go test ./pkg/engine ./internal/util
 
-      - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+  build:
+    name: Build (${{ matrix.goos }}-${{ matrix.goarch }})
+    needs: quality
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - runner: macos-13
+            goos: darwin
+            goarch: amd64
+            ext: ""
+            archive: tar.gz
+          - runner: windows-latest
+            goos: windows
+            goarch: amd64
+            ext: .exe
+            archive: zip
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
         with:
-          distribution: goreleaser
-          version: "~> v2"
-          args: release --clean
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build binary
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "1"
+        run: |
+          mkdir -p dist
+          binary="helm-lsp${{ matrix.ext }}"
+          go build \
+            -ldflags "-s -w -X github.com/acidsugarx/helm-lsp/internal/version.version=${GITHUB_REF_NAME} -X github.com/acidsugarx/helm-lsp/internal/version.gitCommit=${GITHUB_SHA} -X github.com/acidsugarx/helm-lsp/internal/version.gitTreeState=clean" \
+            -o "dist/${binary}" ./cmd/helm-lsp
+
+      - name: Package archive (unix)
+        if: matrix.archive == 'tar.gz'
+        shell: bash
+        run: |
+          name="helm-lsp_${GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          tar -C dist -czf "dist/${name}.tar.gz" "helm-lsp${{ matrix.ext }}"
+
+      - name: Package archive (windows)
+        if: matrix.archive == 'zip'
+        shell: pwsh
+        run: |
+          $name = "helm-lsp_${env:GITHUB_REF_NAME}_${{ matrix.goos }}_${{ matrix.goarch }}"
+          Compress-Archive -Path "dist/helm-lsp${{ matrix.ext }}" -DestinationPath "dist/$name.zip"
+
+      - name: Upload packaged artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+
+  publish:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download packaged artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Generate checksums
+        run: |
+          cd dist
+          sha256sum *.tar.gz *.zip > checksums.txt
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt
